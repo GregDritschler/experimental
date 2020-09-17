@@ -15,7 +15,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: tekton-tasklooprun-controller
+  name: tekton-taskloop-controller
   namespace: tekton-pipelines
   labels:
     app.kubernetes.io/name: controller
@@ -48,12 +48,12 @@ spec:
         # tekton.dev/release value replaced with inputs.params.versionTag in pipeline/tekton/publish.yaml
         pipeline.tekton.dev/release: "devel"
         # labels below are related to istio and should not be used for resource lookup
-        app: tekton-tasklooprun-controller
+        app: tekton-taskloop-controller
         version: "devel"
     spec:
-      serviceAccountName: tekton-tasklooprun-controller
+      serviceAccountName: tekton-taskloop-controller
       containers:
-      - name: tekton-tasklooprun-controller
+      - name: tekton-taskloop-controller
         image: ko://github.com/tektoncd/experimental/task-loops/cmd/controller
         env:
         - name: SYSTEM_NAMESPACE
