@@ -19,7 +19,7 @@ metadata:
   labels:
     app.kubernetes.io/component: controller
     app.kubernetes.io/instance: default
-    app.kubernetes.io/part-of: tekton-pipelines
+    app.kubernetes.io/part-of: tekton-experimental-task-loops
 rules:
     # Controller needs cluster access to all of the CRDs that it is responsible for managing.
   - apiGroups: ["tekton.dev"]
@@ -27,6 +27,9 @@ rules:
     verbs: ["get", "list", "create", "update", "delete", "patch", "watch"]
   - apiGroups: ["tekton.dev"]
     resources: ["runs/status", "taskruns/status"]
+    verbs: ["get", "list", "create", "update", "delete", "patch", "watch"]
+  - apiGroups: ["custom.tekton.dev"]
+    resources: ["taskloops"]
     verbs: ["get", "list", "create", "update", "delete", "patch", "watch"]
 ---
 kind: ClusterRole
@@ -37,7 +40,7 @@ metadata:
   labels:
     app.kubernetes.io/component: controller
     app.kubernetes.io/instance: default
-    app.kubernetes.io/part-of: tekton-pipelines
+    app.kubernetes.io/part-of: tekton-experimental-task-loops
 rules:
   - apiGroups: [""]
     resources: ["events"]

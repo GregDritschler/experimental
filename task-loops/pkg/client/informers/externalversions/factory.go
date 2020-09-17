@@ -172,9 +172,9 @@ type SharedInformerFactory interface {
 	ForResource(resource schema.GroupVersionResource) (GenericInformer, error)
 	WaitForCacheSync(stopCh <-chan struct{}) map[reflect.Type]bool
 
-	Taskloop() taskloop.Interface
+	Custom() taskloop.Interface
 }
 
-func (f *sharedInformerFactory) Taskloop() taskloop.Interface {
+func (f *sharedInformerFactory) Custom() taskloop.Interface {
 	return taskloop.New(f, f.namespace, f.tweakListOptions)
 }

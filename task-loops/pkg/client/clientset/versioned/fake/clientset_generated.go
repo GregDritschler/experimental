@@ -20,8 +20,8 @@ package fake
 
 import (
 	clientset "github.com/tektoncd/experimental/task-loops/pkg/client/clientset/versioned"
-	taskloopv1alpha1 "github.com/tektoncd/experimental/task-loops/pkg/client/clientset/versioned/typed/taskloop/v1alpha1"
-	faketaskloopv1alpha1 "github.com/tektoncd/experimental/task-loops/pkg/client/clientset/versioned/typed/taskloop/v1alpha1/fake"
+	customv1alpha1 "github.com/tektoncd/experimental/task-loops/pkg/client/clientset/versioned/typed/taskloop/v1alpha1"
+	fakecustomv1alpha1 "github.com/tektoncd/experimental/task-loops/pkg/client/clientset/versioned/typed/taskloop/v1alpha1/fake"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/discovery"
@@ -76,7 +76,7 @@ func (c *Clientset) Tracker() testing.ObjectTracker {
 
 var _ clientset.Interface = &Clientset{}
 
-// TaskloopV1alpha1 retrieves the TaskloopV1alpha1Client
-func (c *Clientset) TaskloopV1alpha1() taskloopv1alpha1.TaskloopV1alpha1Interface {
-	return &faketaskloopv1alpha1.FakeTaskloopV1alpha1{Fake: &c.Fake}
+// CustomV1alpha1 retrieves the CustomV1alpha1Client
+func (c *Clientset) CustomV1alpha1() customv1alpha1.CustomV1alpha1Interface {
+	return &fakecustomv1alpha1.FakeCustomV1alpha1{Fake: &c.Fake}
 }

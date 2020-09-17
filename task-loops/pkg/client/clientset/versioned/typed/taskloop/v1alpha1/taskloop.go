@@ -55,7 +55,7 @@ type taskLoops struct {
 }
 
 // newTaskLoops returns a TaskLoops
-func newTaskLoops(c *TaskloopV1alpha1Client, namespace string) *taskLoops {
+func newTaskLoops(c *CustomV1alpha1Client, namespace string) *taskLoops {
 	return &taskLoops{
 		client: c.RESTClient(),
 		ns:     namespace,

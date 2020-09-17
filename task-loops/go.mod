@@ -3,7 +3,9 @@ module github.com/tektoncd/experimental/task-loops
 go 1.13
 
 require (
+	github.com/google/go-cmp v0.4.1
 	github.com/tektoncd/pipeline v0.15.2
+	go.uber.org/zap v1.15.0
 	k8s.io/api v0.17.6
 	k8s.io/apimachinery v0.17.6
 	k8s.io/client-go v11.0.1-0.20190805182717-6502b5e7b1b5+incompatible

@@ -30,13 +30,13 @@ import (
 
 // FakeTaskLoops implements TaskLoopInterface
 type FakeTaskLoops struct {
-	Fake *FakeTaskloopV1alpha1
+	Fake *FakeCustomV1alpha1
 	ns   string
 }
 
-var taskloopsResource = schema.GroupVersionResource{Group: "taskloop", Version: "v1alpha1", Resource: "taskloops"}
+var taskloopsResource = schema.GroupVersionResource{Group: "custom.tekton.dev", Version: "v1alpha1", Resource: "taskloops"}
 
-var taskloopsKind = schema.GroupVersionKind{Group: "taskloop", Version: "v1alpha1", Kind: "TaskLoop"}
+var taskloopsKind = schema.GroupVersionKind{Group: "custom.tekton.dev", Version: "v1alpha1", Kind: "TaskLoop"}
 
 // Get takes name of the taskLoop, and returns the corresponding taskLoop object, and an error if there is any.
 func (c *FakeTaskLoops) Get(name string, options v1.GetOptions) (result *v1alpha1.TaskLoop, err error) {

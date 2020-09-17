@@ -17,8 +17,33 @@ limitations under the License.
 package v1alpha1
 
 import (
+	v1beta1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+// TaskLoopRunReason represents a reason for the Run "Succeeded" condition
+type TaskLoopRunReason string
+
+const (
+	// TaskLoopRunReasonStarted is the reason set when the TaskLoopRun has just started
+	TaskLoopRunReasonStarted TaskLoopRunReason = "Started"
+
+	// TaskLoopRunReasonRunning indicates that the TaskLoopRun is in progress
+	TaskLoopRunReasonRunning TaskLoopRunReason = "Running"
+
+	// TaskLoopRunReasonFailed indicates that one of the TaskRuns created from the TaskLoopRun failed
+	TaskLoopRunReasonFailed TaskLoopRunReason = "Failed"
+
+	// TaskLoopRunReasonSucceeded indicates that all of the TaskRuns created from the TaskLoopRun completed successfully
+	TaskLoopRunReasonSucceeded TaskLoopRunReason = "Succeeded"
+
+	// TaskLoopRunReasonCouldntGetTaskLoop indicates that the associated TaskLoop couldn't be retrieved
+	TaskLoopRunReasonCouldntGetTaskLoop TaskLoopRunReason = "CouldntGetTaskLoop"
+)
+
+func (t TaskLoopRunReason) String() string {
+	return string(t)
+}
 
 // +genclient
 // +genclient:noStatus
@@ -38,31 +63,17 @@ type TaskLoop struct {
 
 // TaskLoopSpec defines the desired state of the TaskLoop
 type TaskLoopSpec struct {
-	// Params declares a list of input parameters that must be supplied when
-	// this TaskLoop is run (same parameters as the Task).
-	Params []ParamSpec `json:"params,omitempty"`
-
-	// WithItems is the array of elements used to iterate the Task.
-	WithItems []string `json:"withItems,omitempty"`
-
-	// Task is the task to run
-	Task TaskLoopTask `json:"task"`
-}
-
-// TaskLoopTask defines the task to run.
-type TaskLoopTask struct {
 	// TaskRef is a reference to a task definition.
 	// +optional
-	TaskRef *TaskRef `json:"taskRef,omitempty"`
+	TaskRef *v1beta1.TaskRef `json:"taskRef,omitempty"`
 
 	// TaskSpec is a specification of a task
 	// +optional
-	TaskSpec *TaskSpec `json:"taskSpec,omitempty"`
+	TaskSpec *v1beta1.TaskSpec `json:"taskSpec,omitempty"`
 
 	// Time after which the TaskRun times out.
-	// This has type string instead of Duration to support parameter substitution.
 	// +optional
-	Timeout string `json:"timeout,omitempty"`
+	Timeout *metav1.Duration `json:"timeout,omitempty"`
 
 	// Retries represents how many times a task should be retried in case of task failure.
 	// +optional

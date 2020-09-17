@@ -35,6 +35,6 @@ func init() {
 
 func withInformer(ctx context.Context) (context.Context, controller.Informer) {
 	f := fake.Get(ctx)
-	inf := f.Taskloop().V1alpha1().TaskLoops()
+	inf := f.Custom().V1alpha1().TaskLoops()
 	return context.WithValue(ctx, taskloop.Key{}, inf), inf.Informer()
 }

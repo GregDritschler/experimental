@@ -61,13 +61,13 @@ func NewFilteredTaskLoopInformer(client versioned.Interface, namespace string, r
 				if tweakListOptions != nil {
 					tweakListOptions(&options)
 				}
-				return client.TaskloopV1alpha1().TaskLoops(namespace).List(options)
+				return client.CustomV1alpha1().TaskLoops(namespace).List(options)
 			},
 			WatchFunc: func(options v1.ListOptions) (watch.Interface, error) {
 				if tweakListOptions != nil {
 					tweakListOptions(&options)
 				}
-				return client.TaskloopV1alpha1().TaskLoops(namespace).Watch(options)
+				return client.CustomV1alpha1().TaskLoops(namespace).Watch(options)
 			},
 		},
 		&taskloopv1alpha1.TaskLoop{},

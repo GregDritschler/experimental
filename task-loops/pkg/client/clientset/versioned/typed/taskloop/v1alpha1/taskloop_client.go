@@ -24,22 +24,22 @@ import (
 	rest "k8s.io/client-go/rest"
 )
 
-type TaskloopV1alpha1Interface interface {
+type CustomV1alpha1Interface interface {
 	RESTClient() rest.Interface
 	TaskLoopsGetter
 }
 
-// TaskloopV1alpha1Client is used to interact with features provided by the taskloop group.
-type TaskloopV1alpha1Client struct {
+// CustomV1alpha1Client is used to interact with features provided by the custom.tekton.dev group.
+type CustomV1alpha1Client struct {
 	restClient rest.Interface
 }
 
-func (c *TaskloopV1alpha1Client) TaskLoops(namespace string) TaskLoopInterface {
+func (c *CustomV1alpha1Client) TaskLoops(namespace string) TaskLoopInterface {
 	return newTaskLoops(c, namespace)
 }
 
-// NewForConfig creates a new TaskloopV1alpha1Client for the given config.
-func NewForConfig(c *rest.Config) (*TaskloopV1alpha1Client, error) {
+// NewForConfig creates a new CustomV1alpha1Client for the given config.
+func NewForConfig(c *rest.Config) (*CustomV1alpha1Client, error) {
 	config := *c
 	if err := setConfigDefaults(&config); err != nil {
 		return nil, err
@@ -48,12 +48,12 @@ func NewForConfig(c *rest.Config) (*TaskloopV1alpha1Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &TaskloopV1alpha1Client{client}, nil
+	return &CustomV1alpha1Client{client}, nil
 }
 
-// NewForConfigOrDie creates a new TaskloopV1alpha1Client for the given config and
+// NewForConfigOrDie creates a new CustomV1alpha1Client for the given config and
 // panics if there is an error in the config.
-func NewForConfigOrDie(c *rest.Config) *TaskloopV1alpha1Client {
+func NewForConfigOrDie(c *rest.Config) *CustomV1alpha1Client {
 	client, err := NewForConfig(c)
 	if err != nil {
 		panic(err)
@@ -61,9 +61,9 @@ func NewForConfigOrDie(c *rest.Config) *TaskloopV1alpha1Client {
 	return client
 }
 
-// New creates a new TaskloopV1alpha1Client for the given RESTClient.
-func New(c rest.Interface) *TaskloopV1alpha1Client {
-	return &TaskloopV1alpha1Client{c}
+// New creates a new CustomV1alpha1Client for the given RESTClient.
+func New(c rest.Interface) *CustomV1alpha1Client {
+	return &CustomV1alpha1Client{c}
 }
 
 func setConfigDefaults(config *rest.Config) error {
@@ -81,7 +81,7 @@ func setConfigDefaults(config *rest.Config) error {
 
 // RESTClient returns a RESTClient that is used to communicate
 // with API server by this client implementation.
-func (c *TaskloopV1alpha1Client) RESTClient() rest.Interface {
+func (c *CustomV1alpha1Client) RESTClient() rest.Interface {
 	if c == nil {
 		return nil
 	}

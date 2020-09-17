@@ -20,7 +20,7 @@ metadata:
   labels:
     app.kubernetes.io/component: controller
     app.kubernetes.io/instance: default
-    app.kubernetes.io/part-of: tekton-pipelines
+    app.kubernetes.io/part-of: tekton-experimental-task-loops
 subjects:
   - kind: ServiceAccount
     name: tekton-tasklooprun-controller

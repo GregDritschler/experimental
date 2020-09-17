@@ -19,12 +19,19 @@ package tasklooprun
 import (
 	"context"
 
+	"github.com/tektoncd/experimental/task-loops/pkg/apis/taskloop"
+	taskloopv1alpha1 "github.com/tektoncd/experimental/task-loops/pkg/apis/taskloop/v1alpha1"
+	taskloopinformer "github.com/tektoncd/experimental/task-loops/pkg/client/injection/informers/taskloop/v1alpha1/taskloop"
+	"github.com/tektoncd/pipeline/pkg/apis/pipeline"
 	"github.com/tektoncd/pipeline/pkg/apis/pipeline/v1alpha1"
 	pipelineclient "github.com/tektoncd/pipeline/pkg/client/injection/client"
 	runinformer "github.com/tektoncd/pipeline/pkg/client/injection/informers/pipeline/v1alpha1/run"
 	taskruninformer "github.com/tektoncd/pipeline/pkg/client/injection/informers/pipeline/v1beta1/taskrun"
 	runreconciler "github.com/tektoncd/pipeline/pkg/client/injection/reconciler/pipeline/v1alpha1/run"
+	listersalpha "github.com/tektoncd/pipeline/pkg/client/listers/pipeline/v1alpha1"
 	pipelinecontroller "github.com/tektoncd/pipeline/pkg/controller"
+	"go.uber.org/zap"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/cache"
 	"knative.dev/pkg/configmap"
 	"knative.dev/pkg/controller"
@@ -38,11 +45,13 @@ func NewController(namespace string) func(context.Context, configmap.Watcher) *c
 		logger := logging.FromContext(ctx)
 		pipelineclientset := pipelineclient.Get(ctx)
 		runInformer := runinformer.Get(ctx)
+		taskLoopInformer := taskloopinformer.Get(ctx)
 		taskRunInformer := taskruninformer.Get(ctx)
 
 		c := &Reconciler{
 			PipelineClientSet: pipelineclientset,
 			runLister:         runInformer.Lister(),
+			taskLoopLister:    taskLoopInformer.Lister(),
 			taskRunLister:     taskRunInformer.Lister(),
 		}
 
@@ -56,14 +65,13 @@ func NewController(namespace string) func(context.Context, configmap.Watcher) *c
 
 		// Add event handler for Runs
 		runInformer.Informer().AddEventHandler(cache.FilteringResourceEventHandler{
-			FilterFunc: pipelinecontroller.FilterRunRef("tekton.dev/v1alpha1", "TaskLoop"),
+			FilterFunc: pipelinecontroller.FilterRunRef(taskloopv1alpha1.SchemeGroupVersion.String(), taskloop.TaskLoopControllerName),
 			Handler:    controller.HandleAll(impl.Enqueue),
 		})
 
 		// Add event handler for TaskRuns controlled by Run
-		// TODO: I think I need a new version of FilterRunRef that works on owner
 		taskRunInformer.Informer().AddEventHandler(cache.FilteringResourceEventHandler{
-			FilterFunc: FilterOwnerRunRef("tekton.dev/v1alpha1", "TaskLoop"),
+			FilterFunc: filterOwnerRunRef(logger, runInformer.Lister(), taskloopv1alpha1.SchemeGroupVersion.String(), taskloop.TaskLoopControllerName),
 			Handler:    controller.HandleAll(impl.EnqueueControllerOf),
 		})
 
@@ -71,8 +79,8 @@ func NewController(namespace string) func(context.Context, configmap.Watcher) *c
 	}
 }
 
-// TODO: If this works, move it to filter.go alongside the other one.
-func filterOwnerRunRef(apiVersion, kind string) func(interface{}) bool {
+// TODO: If this works, move it to filter.go alongside the other one?
+func filterOwnerRunRef(logger *zap.SugaredLogger, runLister listersalpha.RunLister, apiVersion, kind string) func(interface{}) bool {
 	return func(obj interface{}) bool {
 		object, ok := obj.(metav1.Object)
 		if !ok {
@@ -82,17 +90,19 @@ func filterOwnerRunRef(apiVersion, kind string) func(interface{}) bool {
 		if owner == nil {
 			return false
 		}
-		r, ok := owner.(*v1alpha1.Run)
-		if !ok {
-			// Owner is not a Run.
+		if owner.APIVersion != v1alpha1.SchemeGroupVersion.String() || owner.Kind != pipeline.PipelineRunControllerName {
+			// Not owned by a Run
 			return false
 		}
-		if r == nil || r.Spec.Ref == nil {
-			// These are invalid, but just in case they get
-			// created somehow, don't panic.
+		run, err := runLister.Runs(object.GetNamespace()).Get(owner.Name)
+		if err != nil {
+			logger.Infof("Failed to get Run %s which owns %s", owner.Name, object.GetName())
 			return false
 		}
-
-		return r.Spec.Ref.APIVersion == apiVersion && r.Spec.Ref.Kind == v1alpha1.TaskKind(kind)
+		if run.Spec.Ref == nil {
+			// These are invalid, but just in case they get created somehow, don't panic.
+			return false
+		}
+		return run.Spec.Ref.APIVersion == apiVersion && run.Spec.Ref.Kind == v1alpha1.TaskKind(kind)
 	}
 }
