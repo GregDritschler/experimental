@@ -100,9 +100,15 @@ func (c *Reconciler) ReconcileKind(ctx context.Context, run *v1alpha1.Run) pkgre
 	// Store the condition before reconcile
 	beforeCondition := run.Status.GetCondition(apis.ConditionSucceeded)
 
-	// Reconcile this copy of the TaskLoopRun
-	err := c.reconcile(ctx, run)
+	status, err := taskloopv1alpha1.DecodeStatus(&run.Status.ExtraFields)
 	if err != nil {
+		// TODO: If this happens on taskrun status, I'm going to have to fail the Run.
+		logger.Errorf("DecodeStatus error: %v", err.Error())
+	}
+
+	// Reconcile this copy of the TaskLoopRun
+	if err := c.reconcile(ctx, run, status); err != nil {
+		// TODO: Include in multierror? I'm assuming err from inner reconcile is supposed to be retryable?
 		logger.Errorf("Reconcile error: %v", err.Error())
 	}
 
@@ -111,6 +117,13 @@ func (c *Reconciler) ReconcileKind(ctx context.Context, run *v1alpha1.Run) pkgre
 		// TODO: Include in multierror
 	}
 
+	encoded, err := taskloopv1alpha1.EncodeStatus(status)
+	if err != nil {
+		// TODO: If this happens on taskrun status, I'm going to have to fail the Run.
+		logger.Errorf("EncodeStatus error: %v", err.Error())
+	}
+	run.Status.ExtraFields = *encoded
+
 	afterCondition := run.Status.GetCondition(apis.ConditionSucceeded)
 	events.Emit(ctx, beforeCondition, afterCondition, run)
 
@@ -118,20 +131,30 @@ func (c *Reconciler) ReconcileKind(ctx context.Context, run *v1alpha1.Run) pkgre
 	return err
 }
 
-func (c *Reconciler) reconcile(ctx context.Context, run *v1alpha1.Run) error {
+func (c *Reconciler) reconcile(ctx context.Context, run *v1alpha1.Run, status *taskloopv1alpha1.TaskLoopRunStatus) error {
 
 	// Get the TaskLoop referenced by the Run
-	taskLoopMeta, _, err := c.getTaskLoop(run)
+	taskLoopMeta, taskLoopSpec, err := c.getTaskLoop(run)
 	if err != nil {
 		return nil
 	}
 
 	// Store the fetched TaskLoopSpec on the TaskLoopRun for auditing
-	// TODO: FIXME - storing stuff in Run is different
-	// storeTaskLoopSpec(tlr, taskLoopSpec)
+	storeTaskLoopSpec(status, taskLoopSpec)
 
 	// Propagate labels and annotations from TaskLoop to Run.
 	propagateTaskLoopLabelsAndAnnotations(run, taskLoopMeta)
+
+	// Validate TaskLoop spec
+	if err := taskLoopSpec.Validate(ctx); err != nil {
+		run.Status.SetCondition(&apis.Condition{
+			Type:    apis.ConditionSucceeded,
+			Status:  corev1.ConditionFalse,
+			Reason:  taskloopv1alpha1.TaskLoopRunReasonFailedValidation.String(),
+			Message: fmt.Sprintf("TaskLoop %s/%s can't be Run; it has an invalid spec: %s", taskLoopMeta.Namespace, taskLoopMeta.Name, err),
+		})
+		return nil
+	}
 
 	return nil
 }
@@ -203,5 +226,12 @@ func propagateTaskLoopLabelsAndAnnotations(run *v1alpha1.Run, taskLoopMeta *meta
 	}
 	for key, value := range taskLoopMeta.Annotations {
 		run.ObjectMeta.Annotations[key] = value
+	}
+}
+
+func storeTaskLoopSpec(status *taskloopv1alpha1.TaskLoopRunStatus, tls *taskloopv1alpha1.TaskLoopSpec) {
+	// Only store the TaskLoopSpec once, if it has never been set before.
+	if status.TaskLoopSpec == nil {
+		status.TaskLoopSpec = tls
 	}
 }

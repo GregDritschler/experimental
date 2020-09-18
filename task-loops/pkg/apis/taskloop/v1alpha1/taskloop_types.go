@@ -19,31 +19,9 @@ package v1alpha1
 import (
 	v1beta1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/json"
 )
-
-// TaskLoopRunReason represents a reason for the Run "Succeeded" condition
-type TaskLoopRunReason string
-
-const (
-	// TaskLoopRunReasonStarted is the reason set when the TaskLoopRun has just started
-	TaskLoopRunReasonStarted TaskLoopRunReason = "Started"
-
-	// TaskLoopRunReasonRunning indicates that the TaskLoopRun is in progress
-	TaskLoopRunReasonRunning TaskLoopRunReason = "Running"
-
-	// TaskLoopRunReasonFailed indicates that one of the TaskRuns created from the TaskLoopRun failed
-	TaskLoopRunReasonFailed TaskLoopRunReason = "Failed"
-
-	// TaskLoopRunReasonSucceeded indicates that all of the TaskRuns created from the TaskLoopRun completed successfully
-	TaskLoopRunReasonSucceeded TaskLoopRunReason = "Succeeded"
-
-	// TaskLoopRunReasonCouldntGetTaskLoop indicates that the associated TaskLoop couldn't be retrieved
-	TaskLoopRunReasonCouldntGetTaskLoop TaskLoopRunReason = "CouldntGetTaskLoop"
-)
-
-func (t TaskLoopRunReason) String() string {
-	return string(t)
-}
 
 // +genclient
 // +genclient:noStatus
@@ -88,4 +66,58 @@ type TaskLoopList struct {
 	// +optional
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []TaskLoop `json:"items"`
+}
+
+// TaskLoopRunReason represents a reason for the Run "Succeeded" condition
+type TaskLoopRunReason string
+
+const (
+	// TaskLoopRunReasonStarted is the reason set when the TaskLoopRun has just started
+	TaskLoopRunReasonStarted TaskLoopRunReason = "Started"
+
+	// TaskLoopRunReasonRunning indicates that the TaskLoopRun is in progress
+	TaskLoopRunReasonRunning TaskLoopRunReason = "Running"
+
+	// TaskLoopRunReasonFailed indicates that one of the TaskRuns created from the TaskLoopRun failed
+	TaskLoopRunReasonFailed TaskLoopRunReason = "Failed"
+
+	// TaskLoopRunReasonSucceeded indicates that all of the TaskRuns created from the TaskLoopRun completed successfully
+	TaskLoopRunReasonSucceeded TaskLoopRunReason = "Succeeded"
+
+	// TaskLoopRunReasonCouldntGetTaskLoop indicates that the associated TaskLoop couldn't be retrieved
+	TaskLoopRunReasonCouldntGetTaskLoop TaskLoopRunReason = "CouldntGetTaskLoop"
+
+	// TaskLoopRunReasonFailedValidation indicates that the TaskLoop failed runtime validation
+	TaskLoopRunReasonFailedValidation TaskLoopRunReason = "TaskLoopValidationFailed"
+)
+
+func (t TaskLoopRunReason) String() string {
+	return string(t)
+}
+
+// TaskLoopRunStatus contains the status stored in the ExtraFields of a Run that references a TaskLoop.
+type TaskLoopRunStatus struct {
+	// TaskLoopSpec contains the exact spec used to instantiate the Run
+	TaskLoopSpec *TaskLoopSpec `json:"taskLoopSpec,omitempty"`
+}
+
+// DecodeStatus deserializes the TaskLoopRunStatus
+func DecodeStatus(extraFields *runtime.RawExtension) (*TaskLoopRunStatus, error) {
+	status := &TaskLoopRunStatus{}
+	err := json.Unmarshal(extraFields.Raw, status)
+	if err != nil {
+		return nil, err
+	}
+	return status, nil
+}
+
+// EncodeStatus serializes the TaskLoopRunStatus
+func EncodeStatus(status *TaskLoopRunStatus) (*runtime.RawExtension, error) {
+	data, err := json.Marshal(status)
+	if err != nil {
+		return nil, err
+	}
+	return &runtime.RawExtension{
+		Raw: data,
+	}, nil
 }
