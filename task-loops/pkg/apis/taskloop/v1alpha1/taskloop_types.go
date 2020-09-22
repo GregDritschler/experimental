@@ -19,8 +19,6 @@ package v1alpha1
 import (
 	v1beta1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/util/json"
 )
 
 // +genclient
@@ -49,6 +47,9 @@ type TaskLoopSpec struct {
 	// +optional
 	TaskSpec *v1beta1.TaskSpec `json:"taskSpec,omitempty"`
 
+	// IterateParam is the name of the task parameter that is iterated upon.
+	IterateParam string `json:"iterateParam"`
+
 	// Time after which the TaskRun times out.
 	// +optional
 	Timeout *metav1.Duration `json:"timeout,omitempty"`
@@ -72,23 +73,33 @@ type TaskLoopList struct {
 type TaskLoopRunReason string
 
 const (
-	// TaskLoopRunReasonStarted is the reason set when the TaskLoopRun has just started
+	// TaskLoopRunReasonStarted is the reason set when the Run has just started
 	TaskLoopRunReasonStarted TaskLoopRunReason = "Started"
 
-	// TaskLoopRunReasonRunning indicates that the TaskLoopRun is in progress
+	// TaskLoopRunReasonRunning indicates that the Run is in progress
 	TaskLoopRunReasonRunning TaskLoopRunReason = "Running"
 
-	// TaskLoopRunReasonFailed indicates that one of the TaskRuns created from the TaskLoopRun failed
+	// TaskLoopRunReasonFailed indicates that one of the TaskRuns created from the Run failed
 	TaskLoopRunReasonFailed TaskLoopRunReason = "Failed"
 
-	// TaskLoopRunReasonSucceeded indicates that all of the TaskRuns created from the TaskLoopRun completed successfully
+	// TaskLoopRunReasonSucceeded indicates that all of the TaskRuns created from the Run completed successfully
 	TaskLoopRunReasonSucceeded TaskLoopRunReason = "Succeeded"
+
+	// TaskLoopRunReasonCancelled indicates that a Run was cancelled.
+	TaskLoopRunReasonCancelled TaskLoopRunReason = "TaskLoopRunCancelled"
+
+	// TaskLoopRunReasonCouldntCancel indicates that a Run was cancelled but attempting to update
+	// the running TaskRun as cancelled failed.
+	TaskLoopRunReasonCouldntCancel TaskLoopRunReason = "TaskLoopRunCouldntCancel"
 
 	// TaskLoopRunReasonCouldntGetTaskLoop indicates that the associated TaskLoop couldn't be retrieved
 	TaskLoopRunReasonCouldntGetTaskLoop TaskLoopRunReason = "CouldntGetTaskLoop"
 
 	// TaskLoopRunReasonFailedValidation indicates that the TaskLoop failed runtime validation
 	TaskLoopRunReasonFailedValidation TaskLoopRunReason = "TaskLoopValidationFailed"
+
+	// TaskLoopRunReasonInternalError indicates that the TaskLoop failed due to an internal error in the reconciler
+	TaskLoopRunReasonInternalError TaskLoopRunReason = "TaskLoopInternalError"
 )
 
 func (t TaskLoopRunReason) String() string {
@@ -99,25 +110,16 @@ func (t TaskLoopRunReason) String() string {
 type TaskLoopRunStatus struct {
 	// TaskLoopSpec contains the exact spec used to instantiate the Run
 	TaskLoopSpec *TaskLoopSpec `json:"taskLoopSpec,omitempty"`
+	// map of TaskLoopTaskRunStatus with the taskRun name as the key
+	// +optional
+	TaskRuns map[string]*TaskLoopTaskRunStatus `json:"taskRuns,omitempty"`
 }
 
-// DecodeStatus deserializes the TaskLoopRunStatus
-func DecodeStatus(extraFields *runtime.RawExtension) (*TaskLoopRunStatus, error) {
-	status := &TaskLoopRunStatus{}
-	err := json.Unmarshal(extraFields.Raw, status)
-	if err != nil {
-		return nil, err
-	}
-	return status, nil
-}
-
-// EncodeStatus serializes the TaskLoopRunStatus
-func EncodeStatus(status *TaskLoopRunStatus) (*runtime.RawExtension, error) {
-	data, err := json.Marshal(status)
-	if err != nil {
-		return nil, err
-	}
-	return &runtime.RawExtension{
-		Raw: data,
-	}, nil
+// TaskLoopTaskRunStatus contains the iteration number for a TaskRun and the TaskRun's Status
+type TaskLoopTaskRunStatus struct {
+	// iteration number
+	Iteration int `json:"iteration,omitempty"`
+	// Status is the TaskRunStatus for the corresponding TaskRun
+	// +optional
+	Status *v1beta1.TaskRunStatus `json:"status,omitempty"`
 }

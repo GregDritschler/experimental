@@ -6,6 +6,7 @@ require (
 	github.com/google/go-cmp v0.4.1
 	github.com/tektoncd/pipeline v0.15.2
 	go.uber.org/zap v1.15.0
+	gomodules.xyz/jsonpatch/v2 v2.1.0
 	k8s.io/api v0.17.6
 	k8s.io/apimachinery v0.17.6
 	k8s.io/client-go v11.0.1-0.20190805182717-6502b5e7b1b5+incompatible
@@ -14,6 +15,7 @@ require (
 
 // Pin k8s deps to 1.17.6
 replace (
+	github.com/tektoncd/pipeline => ../../pipeline
 	k8s.io/api => k8s.io/api v0.17.6
 	k8s.io/apiextensions-apiserver => k8s.io/apiextensions-apiserver v0.17.6
 	k8s.io/apimachinery => k8s.io/apimachinery v0.17.6
