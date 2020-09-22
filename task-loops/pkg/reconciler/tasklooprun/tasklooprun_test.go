@@ -228,7 +228,7 @@ func checkRunStatus(t *testing.T, run *v1alpha1.Run, expectedStatus map[string]t
 	}
 	t.Log("taskruns", status.TaskRuns)
 	if len(status.TaskRuns) != len(expectedStatus) {
-		t.Errorf("Expected Run status to include two TaskRuns: %v", status.TaskRuns)
+		t.Errorf("Expected Run status to include %d TaskRuns but found %d: %v", len(expectedStatus), len(status.TaskRuns), status.TaskRuns)
 		return
 	}
 	for expectedTaskRunName, expectedTaskRunStatus := range expectedStatus {

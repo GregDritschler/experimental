@@ -5,6 +5,7 @@ go 1.13
 require (
 	github.com/google/go-cmp v0.4.1
 	github.com/tektoncd/pipeline v0.15.2
+	go.opencensus.io v0.22.4
 	go.uber.org/zap v1.15.0
 	gomodules.xyz/jsonpatch/v2 v2.1.0
 	k8s.io/api v0.17.6
