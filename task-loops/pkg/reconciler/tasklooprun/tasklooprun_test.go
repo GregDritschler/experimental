@@ -345,6 +345,20 @@ var runTaskLoopWithInlineTask = &v1alpha1.Run{
 	},
 }
 
+var runWithMissingTaskLoopName = &v1alpha1.Run{
+	ObjectMeta: metav1.ObjectMeta{
+		Name:      "bad-run-taskloop-missing",
+		Namespace: "foo",
+	},
+	Spec: v1alpha1.RunSpec{
+		Ref: &v1alpha1.TaskRef{
+			APIVersion: taskloopv1alpha1.SchemeGroupVersion.String(),
+			Kind:       taskloop.TaskLoopControllerName,
+			// missing Name
+		},
+	},
+}
+
 var runWithNonexistentTaskLoop = &v1alpha1.Run{
 	ObjectMeta: metav1.ObjectMeta{
 		Name:      "bad-run-taskloop-not-found",
@@ -679,6 +693,14 @@ func TestReconcileTaskLoopRunFailures(t *testing.T) {
 		reason     taskloopv1alpha1.TaskLoopRunReason
 		wantEvents []string
 	}{{
+		name:   "missing TaskLoop name",
+		run:    runWithMissingTaskLoopName,
+		reason: taskloopv1alpha1.TaskLoopRunReasonCouldntGetTaskLoop,
+		wantEvents: []string{
+			"Normal Started ",
+			"Warning Failed Missing spec.ref.name for Run",
+		},
+	}, {
 		name:   "nonexistent TaskLoop",
 		run:    runWithNonexistentTaskLoop,
 		reason: taskloopv1alpha1.TaskLoopRunReasonCouldntGetTaskLoop,

@@ -4,6 +4,7 @@ go 1.13
 
 require (
 	github.com/google/go-cmp v0.4.1
+	github.com/hashicorp/go-multierror v1.1.0
 	github.com/tektoncd/pipeline v0.15.2
 	go.opencensus.io v0.22.4
 	go.uber.org/zap v1.15.0

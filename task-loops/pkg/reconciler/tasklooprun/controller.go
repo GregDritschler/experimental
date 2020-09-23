@@ -21,6 +21,7 @@ import (
 
 	"github.com/tektoncd/experimental/task-loops/pkg/apis/taskloop"
 	taskloopv1alpha1 "github.com/tektoncd/experimental/task-loops/pkg/apis/taskloop/v1alpha1"
+	taskloopclient "github.com/tektoncd/experimental/task-loops/pkg/client/injection/client"
 	taskloopinformer "github.com/tektoncd/experimental/task-loops/pkg/client/injection/informers/taskloop/v1alpha1/taskloop"
 	pipelineclient "github.com/tektoncd/pipeline/pkg/client/injection/client"
 	runinformer "github.com/tektoncd/pipeline/pkg/client/injection/informers/pipeline/v1alpha1/run"
@@ -39,12 +40,14 @@ func NewController(namespace string) func(context.Context, configmap.Watcher) *c
 
 		logger := logging.FromContext(ctx)
 		pipelineclientset := pipelineclient.Get(ctx)
+		taskloopclientset := taskloopclient.Get(ctx)
 		runInformer := runinformer.Get(ctx)
 		taskLoopInformer := taskloopinformer.Get(ctx)
 		taskRunInformer := taskruninformer.Get(ctx)
 
 		c := &Reconciler{
-			PipelineClientSet: pipelineclientset,
+			pipelineClientSet: pipelineclientset,
+			taskloopClientSet: taskloopclientset,
 			runLister:         runInformer.Lister(),
 			taskLoopLister:    taskLoopInformer.Lister(),
 			taskRunLister:     taskRunInformer.Lister(),
@@ -52,7 +55,7 @@ func NewController(namespace string) func(context.Context, configmap.Watcher) *c
 
 		impl := runreconciler.NewImpl(ctx, c, func(impl *controller.Impl) controller.Options {
 			return controller.Options{
-				AgentName: "Run (task loop)", // TODO: Fix name
+				AgentName: "run-taskloop",
 			}
 		})
 

@@ -306,10 +306,6 @@ func TestTaskLoopRun(t *testing.T) {
 				}
 			}
 
-			// TODO: This is needed because taskloop reconciler is using lister to get taskloop.
-			// Need to change reconciler to use k8 client.
-			time.Sleep(2 * time.Second)
-
 			run := tc.run.DeepCopy()
 			run.Namespace = namespace
 			run, err := c.RunClient.Create(tc.run)
@@ -399,7 +395,7 @@ func TestTaskLoopRun(t *testing.T) {
 
 			t.Logf("Checking events that were created from Run")
 			matchKinds := map[string][]string{"Run": {run.Name}}
-			events, err := collectMatchingEvents2(c.KubeClient, namespace, matchKinds)
+			events, err := collectMatchingEvents(c.KubeClient, namespace, matchKinds)
 			if err != nil {
 				t.Fatalf("Failed to collect matching events: %q", err)
 			}
@@ -430,13 +426,9 @@ func getTaskLoopClient(t *testing.T, namespace string) resourceversioned.TaskLoo
 	return cs.CustomV1alpha1().TaskLoops(namespace)
 }
 
-// TODO: This is copied this from pipelinerun_test and modified to drop the reason parameter.
-// Can a common version be made and shared somewhere? Maybe make reason optional somehow (pointer to string?).
-//
-// collectMatchingEvents collects list of events under 5 seconds that match
-// 1. matchKinds which is a map of Kind of Object with name of objects
-// 2. reason which is the expected reason of event  <<<<<< I DROPPED THIS
-func collectMatchingEvents2(kubeClient *knativetest.KubeClient, namespace string, kinds map[string][]string) ([]*corev1.Event, error) {
+// collectMatchingEvents collects a list of events under 5 seconds that match certain objects by kind and name.
+// This is copied from pipelinerun_test and modified to drop the reason parameter.
+func collectMatchingEvents(kubeClient *knativetest.KubeClient, namespace string, kinds map[string][]string) ([]*corev1.Event, error) {
 	var events []*corev1.Event
 
 	watchEvents, err := kubeClient.Kube.CoreV1().Events(namespace).Watch(metav1.ListOptions{})
@@ -455,7 +447,7 @@ func collectMatchingEvents2(kubeClient *knativetest.KubeClient, namespace string
 			event := wevent.Object.(*corev1.Event)
 			if val, ok := kinds[event.InvolvedObject.Kind]; ok {
 				for _, expectedName := range val {
-					if event.InvolvedObject.Name == expectedName { // <<<< I DROPPED REASON CHECK
+					if event.InvolvedObject.Name == expectedName {
 						events = append(events, event)
 					}
 				}

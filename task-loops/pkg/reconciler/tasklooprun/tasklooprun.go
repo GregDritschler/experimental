@@ -24,8 +24,10 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/hashicorp/go-multierror"
 	"github.com/tektoncd/experimental/task-loops/pkg/apis/taskloop"
 	taskloopv1alpha1 "github.com/tektoncd/experimental/task-loops/pkg/apis/taskloop/v1alpha1"
+	taskloopclientset "github.com/tektoncd/experimental/task-loops/pkg/client/clientset/versioned"
 	listerstaskloop "github.com/tektoncd/experimental/task-loops/pkg/client/listers/taskloop/v1alpha1"
 	"github.com/tektoncd/pipeline/pkg/apis/pipeline"
 	"github.com/tektoncd/pipeline/pkg/apis/pipeline/v1alpha1"
@@ -60,7 +62,8 @@ const (
 
 // Reconciler implements controller.Reconciler for Configuration resources.
 type Reconciler struct {
-	PipelineClientSet clientset.Interface
+	pipelineClientSet clientset.Interface
+	taskloopClientSet taskloopclientset.Interface
 	runLister         listersalpha.RunLister
 	taskLoopLister    listerstaskloop.TaskLoopLister
 	taskRunLister     listers.TaskRunLister
@@ -74,10 +77,18 @@ var (
 // ReconcileKind compares the actual state with the desired, and attempts to converge the two.
 // It then updates the Status block of the Run resource with the current status of the resource.
 func (c *Reconciler) ReconcileKind(ctx context.Context, run *v1alpha1.Run) pkgreconciler.Event {
+	var merr error
 	logger := logging.FromContext(ctx)
 	logger.Infof("Reconciling Run %s/%s at %v", run.Namespace, run.Name, time.Now())
 
-	// TODO: Add bullet proofing check for Run referencing a TaskLoop
+	// Check that the Run references a TaskLoop CRD.  The logic is controller.go should ensure that only this type of Run
+	// is reconciled this controller but it never hurts to do some bullet-proofing.
+	if run.Spec.Ref == nil ||
+		run.Spec.Ref.APIVersion != taskloopv1alpha1.SchemeGroupVersion.String() ||
+		run.Spec.Ref.Kind != taskloop.TaskLoopControllerName {
+		logger.Errorf("Received control for a Run %s/%s that does not reference a TaskLoop custom CRD", run.Namespace, run.Name)
+		return nil
+	}
 
 	// If the Run has not started, initialize the Condition and set the start time.
 	if !run.HasStarted() {
@@ -99,7 +110,6 @@ func (c *Reconciler) ReconcileKind(ctx context.Context, run *v1alpha1.Run) pkgre
 
 	if run.IsDone() {
 		logger.Infof("Run %s/%s is done", run.Namespace, run.Name)
-		// TODO: metrics (metrics.DurationAndCount) -- this might not be right place (double counting)
 		return nil
 	}
 
@@ -109,34 +119,32 @@ func (c *Reconciler) ReconcileKind(ctx context.Context, run *v1alpha1.Run) pkgre
 	status := &taskloopv1alpha1.TaskLoopRunStatus{}
 	if err := run.Status.DecodeExtraFields(status); err != nil {
 		run.Status.MarkFailed(taskloopv1alpha1.TaskLoopRunReasonInternalError.String(),
-			"DecodeExtraFields error: %v", err)
+			"Internal error calling DecodeExtraFields: %v", err)
 		logger.Errorf("DecodeExtraFields error: %v", err.Error())
 	}
 
 	// Reconcile the Run
 	if err := c.reconcile(ctx, run, status); err != nil {
-		// TODO: Include in multierror? Is an err from inner reconcile is supposed to be retryable?
 		logger.Errorf("Reconcile error: %v", err.Error())
+		merr = multierror.Append(merr, err)
 	}
 
 	if err := c.updateLabelsAndAnnotations(run); err != nil {
 		logger.Warn("Failed to update Run labels/annotations", zap.Error(err))
-		// TODO: Include in multierror
+		merr = multierror.Append(merr, err)
 	}
 
 	if err := run.Status.EncodeExtraFields(status); err != nil {
 		run.Status.MarkFailed(taskloopv1alpha1.TaskLoopRunReasonInternalError.String(),
-			"EncodeExtraFields error: %v", err)
+			"Internal error calling EncodeExtraFields: %v", err)
 		logger.Errorf("EncodeExtraFields error: %v", err.Error())
 	}
 
 	afterCondition := run.Status.GetCondition(apis.ConditionSucceeded)
 	events.Emit(ctx, beforeCondition, afterCondition, run)
 
-	// TODO: Retryable errors should be returned.
-	// There are some, like being unable to create a taskrun.
-	// May have to put in the multierr stuff too.
-	return nil
+	// Only transient errors that should retry the reconcile are returned.
+	return merr
 }
 
 func (c *Reconciler) reconcile(ctx context.Context, run *v1alpha1.Run, status *taskloopv1alpha1.TaskLoopRunStatus) error {
@@ -186,7 +194,7 @@ func (c *Reconciler) reconcile(ctx context.Context, run *v1alpha1.Run, status *t
 				if err != nil {
 					return fmt.Errorf("Failed to make patch to cancel TaskRun %s: %v", highestIterationTr.Name, err)
 				}
-				if _, err := c.PipelineClientSet.TektonV1beta1().TaskRuns(run.Namespace).Patch(highestIterationTr.Name, types.JSONPatchType, b, ""); err != nil {
+				if _, err := c.pipelineClientSet.TektonV1beta1().TaskRuns(run.Namespace).Patch(highestIterationTr.Name, types.JSONPatchType, b, ""); err != nil {
 					run.Status.MarkRunning(taskloopv1alpha1.TaskLoopRunReasonCouldntCancel.String(),
 						"Failed to patch TaskRun `%s` with cancellation: %v", highestIterationTr.Name, err)
 					return nil
@@ -265,7 +273,12 @@ func (c *Reconciler) getTaskLoop(run *v1alpha1.Run) (*metav1.ObjectMeta, *tasklo
 	taskLoopMeta := metav1.ObjectMeta{}
 	taskLoopSpec := taskloopv1alpha1.TaskLoopSpec{}
 	if run.Spec.Ref != nil && run.Spec.Ref.Name != "" {
-		tl, err := c.taskLoopLister.TaskLoops(run.Namespace).Get(run.Spec.Ref.Name)
+		// Use the k8 client to get the TaskLoop rather than the lister.  This avoids a timing issue where
+		// the TaskLoop is not yet in the lister cache if it is created at nearly the same time as the Run.
+		// See https://github.com/tektoncd/pipeline/issues/2740 for discussion on this issue.
+		//
+		// tl, err := c.taskLoopLister.TaskLoops(run.Namespace).Get(run.Spec.Ref.Name)
+		tl, err := c.taskloopClientSet.CustomV1alpha1().TaskLoops(run.Namespace).Get(run.Spec.Ref.Name, metav1.GetOptions{})
 		if err != nil {
 			run.Status.MarkFailed(taskloopv1alpha1.TaskLoopRunReasonCouldntGetTaskLoop.String(),
 				"Error retrieving TaskLoop for Run %s/%s: %s",
@@ -314,7 +327,7 @@ func (c *Reconciler) createTaskRun(logger *zap.SugaredLogger, tls *taskloopv1alp
 	}
 
 	logger.Infof("Creating a new TaskRun object %s", trName)
-	return c.PipelineClientSet.TektonV1beta1().TaskRuns(run.Namespace).Create(tr)
+	return c.pipelineClientSet.TektonV1beta1().TaskRuns(run.Namespace).Create(tr)
 
 }
 
@@ -329,7 +342,7 @@ func (c *Reconciler) retryTaskRun(tr *v1beta1.TaskRun) (*v1beta1.TaskRun, error)
 		Type:   apis.ConditionSucceeded,
 		Status: corev1.ConditionUnknown,
 	})
-	return c.PipelineClientSet.TektonV1beta1().TaskRuns(tr.Namespace).UpdateStatus(tr)
+	return c.pipelineClientSet.TektonV1beta1().TaskRuns(tr.Namespace).UpdateStatus(tr)
 }
 
 func (c *Reconciler) updateLabelsAndAnnotations(run *v1alpha1.Run) error {
@@ -348,7 +361,7 @@ func (c *Reconciler) updateLabelsAndAnnotations(run *v1alpha1.Run) error {
 		if err != nil {
 			return err
 		}
-		_, err = c.PipelineClientSet.TektonV1alpha1().Runs(run.Namespace).Patch(run.Name, types.MergePatchType, patch)
+		_, err = c.pipelineClientSet.TektonV1alpha1().Runs(run.Namespace).Patch(run.Name, types.MergePatchType, patch)
 		return err
 	}
 	return nil
@@ -423,8 +436,6 @@ func computeIterations(run *v1alpha1.Run, tls *taskloopv1alpha1.TaskLoopSpec) (i
 }
 
 func getParameters(run *v1alpha1.Run, tls *taskloopv1alpha1.TaskLoopSpec, iteration int) []v1beta1.Param {
-	// TODO: Should this do some error checking on the iteration being out of bounds?
-	// It's an internal logic error if it happens but best to bullet proof rather than panic.
 	out := make([]v1beta1.Param, len(run.Spec.Params))
 	for i, p := range run.Spec.Params {
 		if p.Name == tls.IterateParam {
