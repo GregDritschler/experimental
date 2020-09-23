@@ -19,9 +19,11 @@ limitations under the License.
 package test
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -36,8 +38,10 @@ import (
 	"github.com/tektoncd/pipeline/pkg/pod"
 	tektontest "github.com/tektoncd/pipeline/test"
 	"github.com/tektoncd/pipeline/test/diff"
+	"gomodules.xyz/jsonpatch/v2"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"knative.dev/pkg/apis"
 	duckv1beta1 "knative.dev/pkg/apis/duck/v1beta1"
 	knativetest "knative.dev/pkg/test"
@@ -410,6 +414,124 @@ func TestTaskLoopRun(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCancelTaskLoopRun(t *testing.T) {
+	t.Run("cancel", func(t *testing.T) {
+		c, namespace := tektontest.Setup(t)
+		taskLoopClient := getTaskLoopClient(t, namespace)
+		t.Parallel()
+
+		knativetest.CleanupOnInterrupt(func() { tektontest.TearDown(t, c, namespace) }, t.Logf)
+		defer tektontest.TearDown(t, c, namespace)
+
+		a_taskloop := &taskloopv1alpha1.TaskLoop{
+			ObjectMeta: metav1.ObjectMeta{Name: "sleep", Namespace: namespace},
+			Spec: taskloopv1alpha1.TaskLoopSpec{
+				TaskSpec: &v1beta1.TaskSpec{
+					Params: []v1beta1.ParamSpec{{
+						Name: "sleep-time",
+						Type: v1beta1.ParamTypeString,
+					}},
+					Steps: []v1beta1.Step{{
+						Container: corev1.Container{
+							Image: "busybox",
+						},
+						Script: "sleep $(params.sleep-time)",
+					}},
+				},
+				IterateParam: "sleep-time",
+			},
+		}
+
+		run := &v1alpha1.Run{
+			ObjectMeta: metav1.ObjectMeta{Name: "cancel-me", Namespace: namespace},
+			Spec: v1alpha1.RunSpec{
+				Params: []v1beta1.Param{{
+					Name:  "sleep-time",
+					Value: v1beta1.ArrayOrString{Type: v1beta1.ParamTypeArray, ArrayVal: []string{"5000", "5000"}},
+				}},
+				Ref: &v1alpha1.TaskRef{
+					APIVersion: taskloopv1alpha1.SchemeGroupVersion.String(),
+					Kind:       taskloop.TaskLoopControllerName,
+					Name:       "sleep",
+				},
+			},
+		}
+
+		t.Logf("Creating TaskLoop in namespace %s", namespace)
+		if _, err := taskLoopClient.Create(a_taskloop); err != nil {
+			t.Fatalf("Failed to create TaskLoop `%s`: %s", a_taskloop.Name, err)
+		}
+
+		t.Logf("Creating Run in namespace %s", namespace)
+		if _, err := c.RunClient.Create(run); err != nil {
+			t.Fatalf("Failed to create Run `%s`: %s", run.Name, err)
+		}
+
+		t.Logf("Waiting for Run %s in namespace %s to be started", run.Name, namespace)
+		if err := tektontest.WaitForRunState(c, run.Name, runTimeout, tektontest.Running(run.Name), "RunRunning"); err != nil {
+			t.Fatalf("Error waiting for Run %s to be running: %s", run.Name, err)
+		}
+
+		// The current looping behavior is to run a single TaskRun at a time but the following code is generalized
+		// to allow multiple TaskRuns in case that is added.
+		taskrunList, err := c.TaskRunClient.List(metav1.ListOptions{LabelSelector: "tekton.dev/run=" + run.Name})
+		if err != nil {
+			t.Fatalf("Error listing TaskRuns for Run %s: %s", run.Name, err)
+		}
+
+		var wg sync.WaitGroup
+		t.Logf("Waiting for TaskRuns from Run %s in namespace %s to be running", run.Name, namespace)
+		for _, taskrunItem := range taskrunList.Items {
+			wg.Add(1)
+			go func(name string) {
+				defer wg.Done()
+				err := tektontest.WaitForTaskRunState(c, name, tektontest.Running(name), "TaskRunRunning")
+				if err != nil {
+					t.Errorf("Error waiting for TaskRun %s to be running: %v", name, err)
+				}
+			}(taskrunItem.Name)
+		}
+		wg.Wait()
+
+		pr, err := c.RunClient.Get(run.Name, metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("Failed to get Run `%s`: %s", run.Name, err)
+		}
+
+		patches := []jsonpatch.JsonPatchOperation{{
+			Operation: "add",
+			Path:      "/spec/status",
+			Value:     v1alpha1.RunSpecStatusCancelled,
+		}}
+		patchBytes, err := json.Marshal(patches)
+		if err != nil {
+			t.Fatalf("failed to marshal patch bytes in order to cancel")
+		}
+		if _, err := c.RunClient.Patch(pr.Name, types.JSONPatchType, patchBytes, ""); err != nil {
+			t.Fatalf("Failed to patch Run `%s` with cancellation: %s", run.Name, err)
+		}
+
+		t.Logf("Waiting for Run %s in namespace %s to be cancelled", run.Name, namespace)
+		if err := tektontest.WaitForRunState(c, run.Name, runTimeout,
+			tektontest.FailedWithReason(taskloopv1alpha1.TaskLoopRunReasonCancelled.String(), run.Name), "RunCancelled"); err != nil {
+			t.Errorf("Error waiting for Run %q to finished: %s", run.Name, err)
+		}
+
+		t.Logf("Waiting for TaskRuns in Run %s in namespace %s to be cancelled", run.Name, namespace)
+		for _, taskrunItem := range taskrunList.Items {
+			wg.Add(1)
+			go func(name string) {
+				defer wg.Done()
+				err := tektontest.WaitForTaskRunState(c, name, tektontest.FailedWithReason("TaskRunCancelled", name), "TaskRunCancelled")
+				if err != nil {
+					t.Errorf("Error waiting for TaskRun %s to be finished: %v", name, err)
+				}
+			}(taskrunItem.Name)
+		}
+		wg.Wait()
+	})
 }
 
 func getTaskLoopClient(t *testing.T, namespace string) resourceversioned.TaskLoopInterface {
