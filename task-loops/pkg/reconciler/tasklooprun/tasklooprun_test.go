@@ -392,6 +392,28 @@ var runWithMissingIterateParam = &v1alpha1.Run{
 	},
 }
 
+var runWithIterateParamNotAnArray = &v1alpha1.Run{
+	ObjectMeta: metav1.ObjectMeta{
+		Name:      "bad-run-iterate-param-not-an-array",
+		Namespace: "foo",
+	},
+	Spec: v1alpha1.RunSpec{
+		Params: []v1beta1.Param{{
+			// Value of iteration parameter must be an array so this is an error.
+			Name:  "current-item",
+			Value: v1beta1.ArrayOrString{Type: v1beta1.ParamTypeString, StringVal: "item1"},
+		}, {
+			Name:  "additional-parameter",
+			Value: v1beta1.ArrayOrString{Type: v1beta1.ParamTypeString, StringVal: "stuff"},
+		}},
+		Ref: &v1alpha1.TaskRef{
+			APIVersion: taskloopv1alpha1.SchemeGroupVersion.String(),
+			Kind:       taskloop.TaskLoopControllerName,
+			Name:       "a-taskloop",
+		},
+	},
+}
+
 var expectedTaskRunIteration1 = &v1beta1.TaskRun{
 	ObjectMeta: metav1.ObjectMeta{
 		Name:      "run-taskloop-00001-9l9zj",
@@ -715,7 +737,16 @@ func TestReconcileTaskLoopRunFailures(t *testing.T) {
 		reason:   taskloopv1alpha1.TaskLoopRunReasonFailedValidation,
 		wantEvents: []string{
 			"Normal Started ",
-			"Warning Failed Cannot determine number of iterations",
+			`Warning Failed Cannot determine number of iterations: The iterate parameter "current-item" was not found`,
+		},
+	}, {
+		name:     "iterate parameter not an array",
+		taskloop: aTaskLoop,
+		run:      runWithIterateParamNotAnArray,
+		reason:   taskloopv1alpha1.TaskLoopRunReasonFailedValidation,
+		wantEvents: []string{
+			"Normal Started ",
+			`Warning Failed Cannot determine number of iterations: The value of the iterate parameter "current-item" is not an array`,
 		},
 	}}
 
