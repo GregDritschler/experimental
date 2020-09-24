@@ -246,7 +246,7 @@ These limitations may be addressed in future issues based on community feedback.
 
 * If a `TaskRun` fails, the execution of the `TaskLoop` stops.  `TaskRun`s for remaining iteration values are not created.
 
-* `Task` results are not collected into `Run` results (`run.status.results`).  
+* `Task` results are not collected into `Run` results (`run.status.results`).
     However the results of each `TaskRun` can be seen in the TaskRun status under `run.status.extraFields`.  
 
 * `Run` does not support specifying workspaces, pipeline resources, a service account name or a pod template.
