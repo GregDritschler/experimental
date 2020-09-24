@@ -13,7 +13,7 @@ This is an **_experimental feature_**.  The purpose is to explore potential use 
 
 Two resources are required to run a Task in a loop:
 
-* A `TaskLoop` defines the Task to run and how to iterate it.
+* A `TaskLoop` defines the [Task](https://github.com/tektoncd/pipeline/blob/master/docs/tasks.md) to run and how to iterate it.
 * A `Run` executes the TaskLoop and provides parameters to pass to the Task.
 
 ### Configuring a `TaskLoop`
@@ -54,11 +54,111 @@ spec:
 
 #### Specifying the target task
 
+To specify the `Task` you want to execute, use the `taskRef` field as shown below:
+
+```yaml
+spec:
+  taskRef:
+    name: message-task
+```
+
+You can also embed the `Task` definition directly using the `taskSpec` field:
+
+```yaml
+spec:
+  taskSpec:
+    params:
+      - name: message
+        type: string
+    steps:
+      - name: echo
+        image: ubuntu
+        script: |
+          #!/usr/bin/env bash
+          echo "$(params.message)"
+```
+
+
 #### Specifying the iteration parameter
+
+The `iterateParam` field specifies the name of the `Task` parameter which varies for each execution of the `Task`.
+This is what controls the loop.
+
+* The parameter type as defined in the `Task` must be `string`.
+* The parameter value as defined in the `Run` must be an array.
+
+For example, suppose you have a `Task` that runs tests based on a parameter name called `test-type`.
+
+```yaml
+spec:
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: testtask
+spec:
+  params:
+    - name: test-type
+      type: string
+  steps:
+    - name: run-test
+      image: docker.hub/...
+      args: ["$(params.test-name)"]
+```
+
+If you want to run this task for multiple test types, your `TaskLoop` would look like this:
+
+```yaml
+apiVersion: custom.tekton.dev/v1alpha1
+kind: TaskLoop
+metadata:
+  name: testloop
+spec:
+  taskRef:
+    name: testtask
+  iterateParam: test-type
+```
+
+Your `Run` would look like this:
+
+```yaml
+apiVersion: tekton.dev/v1alpha1
+kind: Run
+metadata:
+  generateName: testloop-run-
+spec:
+  params:
+    - name: test-type
+      value:
+        - codeanalysis
+        - unittests
+        - e2etests
+  ref:
+    apiVersion: custom.tekton.dev/v1alpha1
+    kind: TaskLoop
+    name: testloop
+```
+
+This `Run` would result in three `TaskRun`s being created to run the `Task` `testtask`.
+In the first `TaskRun` the parameter `test-type` would be set to `codeanalysis`.
+In the second `TaskRun` the parameter `test-type` would be set to `unittests`.
+In the third `TaskRun` the parameter `test-type` would be set to `e2etests`.
 
 #### Specifying a timeout
 
+You can use the `timeout` field to set the TaskRun's desired timeout value.
+If you do not specify this value for the TaskRun, the global default timeout value applies.
+If you set the timeout to 0, the TaskRun will have no timeout and will run until it completes successfully or fails from an error.
+
+The timeout value is a duration conforming to Go's ParseDuration format. For example, valid values are 1h30m, 1h, 1m, 60s, and 0.
+
+See [Configuring the failure timeout](https://github.com/tektoncd/pipeline/blob/master/docs/taskruns.md#configuring-the-failure-timeout)
+for more information about how TaskRun processes the timeout.
+
 #### Specifying retries
+
+You can specify the number of times to retry the execution of a `Task` when it fails.
+If you don't explicitly specify a value, no retry is performed.
+
 
 ### Configuring a `Run`
 
