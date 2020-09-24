@@ -102,7 +102,7 @@ spec:
   steps:
     - name: run-test
       image: docker.hub/...
-      args: ["$(params.test-name)"]
+      args: ["$(params.test-type)"]
 ```
 
 If you want to run this task for multiple test types, your `TaskLoop` would look like this:
@@ -145,7 +145,7 @@ In the third `TaskRun` the parameter `test-type` would be set to `e2etests`.
 
 #### Specifying a timeout
 
-You can use the `timeout` field to set the TaskRun's desired timeout value.
+You can use the `timeout` field to set the TaskRun's timeout value.
 If you do not specify this value for the TaskRun, the global default timeout value applies.
 If you set the timeout to 0, the TaskRun will have no timeout and will run until it completes successfully or fails from an error.
 
@@ -159,7 +159,6 @@ for more information about how TaskRun processes the timeout.
 You can specify the number of times to retry the execution of a `Task` when it fails.
 If you don't explicitly specify a value, no retry is performed.
 
-
 ### Configuring a `Run`
 
 A `Run` definition supports the following fields:
@@ -169,11 +168,38 @@ A `Run` definition supports the following fields:
   - [`kind`][kubernetes-overview] - Identifies this resource object as a `Run` object.
   - [`metadata`][kubernetes-overview] - Specifies the metadata that uniquely identifies the `Run`, such as a `name`.
   - [`spec`][kubernetes-overview] - Specifies the configuration for the `Run`.
-    - [`ref`](#specifying-the-target-custom-task) - Specifies the type and name of the `TaskLoop` to execute.
-    - [`params`](#specifying-parameters) - Specifies the desired execution parameters for the custom task.
+    - [`ref`](#specifying-the-taskloop) - Specifies the type and name of the `TaskLoop` to execute.
+    - [`params`](#specifying-parameters) - Specifies the execution parameters for the `Task`.
 
 [kubernetes-overview]:
   https://kubernetes.io/docs/concepts/overview/working-with-objects/kubernetes-objects/#required-fields
+
+### Specifying the TaskLoop
+
+Your `Run` must reference a TaskLoop.  It must include the `apiVersion`, `kind` and `name` fields as shown below.
+
+```yaml
+apiVersion: tekton.dev/v1alpha1
+kind: Run
+metadata:
+  generateName: run-
+spec:
+  params:
+    ...
+  ref:
+    apiVersion: custom.tekton.dev/v1alpha1
+    kind: TaskLoop
+    name: mytaskloop
+```
+
+### Specifying parameters
+
+Your `Run` can provide any parameters that are defined by the `Task` that is referenced by the `TaskLoop`.
+The parameters are passed through as is to each `TaskRun` with the exception of the iteration parameter named by `iterateParam` in the `TaskLoop`.
+
+* In the `Run`, the iteration parameter value must be an array.
+* A `TaskRun` is created for each array element with the iterate parameter value set to the element.
+* In the `Task` the iteration parameter type must be `string`.
 
 ## Limitations
 
