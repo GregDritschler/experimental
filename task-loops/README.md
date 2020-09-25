@@ -90,7 +90,6 @@ This is what controls the loop.
 For example, suppose you have a `Task` that runs tests based on a parameter name called `test-type`.
 
 ```yaml
-spec:
 apiVersion: tekton.dev/v1beta1
 kind: Task
 metadata:
@@ -145,9 +144,9 @@ In the third `TaskRun` the parameter `test-type` would be set to `e2etests`.
 
 #### Specifying a timeout
 
-You can use the `timeout` field to set the `TaskRun`'s timeout value.
-If you do not specify this value for the `TaskRun`, the global default timeout value applies.
-If you set the timeout to 0, the `TaskRun` will have no timeout and will run until it completes successfully or fails from an error.
+You can use the `timeout` field to set each `TaskRun`'s timeout value.
+If you do not specify this value, the global default timeout value applies.
+If you set the timeout to 0, each `TaskRun` will have no timeout and will run until it completes successfully or fails from an error.
 
 The timeout value is a duration conforming to Go's ParseDuration format. For example, valid values are 1h30m, 1h, 1m, 60s, and 0.
 
