@@ -189,7 +189,7 @@ metadata:
   generateName: run-
 spec:
   params:
-    ...
+    # […]
   ref:
     apiVersion: custom.tekton.dev/v1alpha1
     kind: TaskLoop
@@ -215,7 +215,7 @@ apiVersion: tekton.dev/v1alpha1
 kind: Run
 metadata:
   generateName: run-
-...
+# […]
 status:
   completionTime: "2020-09-24T17:33:10Z"
   conditions:
@@ -239,6 +239,22 @@ status:
 
 For more information about monitoring `Run` in general, see [Monitoring execution status](https://github.com/tektoncd/pipeline/blob/master/docs/runs.md#monitoring-execution-status).
 
+### Cancelling a Run
+
+To cancel a `Run` that's currently executing, update its status to mark it as cancelled.  The running `TaskRun` is cancelled. 
+
+Example of cancelling a `Run`:
+
+```yaml
+apiVersion: tekton.dev/v1alpha1
+kind: Run
+metadata:
+  name: run-loop
+spec:
+  # […]
+  status: "RunCancelled"
+```
+
 ## Limitations
 
 The following limitations exist.
@@ -254,6 +270,8 @@ These limitations may be addressed in future issues based on community feedback.
     However the results of each `TaskRun` can be seen in the TaskRun status under `run.status.extraFields`.  
 
 * `Run` does not support specifying workspaces, pipeline resources, a service account name or a pod template.
+
+* There are no metrics specific to `Run`.
 
 ## Uninstall
 
