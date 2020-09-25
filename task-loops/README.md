@@ -7,6 +7,11 @@ This functionality is provided by a controller that implements the [Tekton Custo
 
 This is an **_experimental feature_**.  The purpose is to explore potential use cases for looping in Tekton and how they may be achieved.
 
+- [Install](#install)
+- [Usage](#usage)
+- [Limitations](#limitations)
+- [Uninstall](#uninstall)
+
 ## Install
 
 ## Usage
@@ -145,7 +150,7 @@ In the third `TaskRun` the parameter `test-type` would be set to `e2etests`.
 #### Specifying a timeout
 
 You can use the `timeout` field to set each `TaskRun`'s timeout value.
-If you do not specify this value, the global default timeout value applies.
+If you do not specify this value, Tekton's global default timeout value applies.
 If you set the timeout to 0, each `TaskRun` will have no timeout and will run until it completes successfully or fails from an error.
 
 The timeout value is a duration conforming to Go's ParseDuration format. For example, valid values are 1h30m, 1h, 1m, 60s, and 0.
@@ -200,10 +205,10 @@ The parameters are passed through as is to each `TaskRun` with the exception of 
 * A `TaskRun` is created for each array element with the iterate parameter value set to the element.
 * In the `Task` the iteration parameter type must be `string`.
 
-## Monitoring execution status
+### Monitoring execution status
 
 As your `Run` executes, its `status` field accumulates information on the execution of each `TaskRun` as well as the `Run` as a whole.
-This information includes the complete [status of each `TaskRun`](taskruns.md#monitoring-execution-status).
+This information includes the complete [status of each `TaskRun`](taskruns.md#monitoring-execution-status) under `status.extraFields.taskRuns`.
 
 ```yaml
 apiVersion: tekton.dev/v1alpha1
@@ -224,11 +229,11 @@ status:
       run-nt4p7-00001-zhtc8:
         iteration: 1
         status:
-          # TaskRun status for iteration 1 here
+          # TaskRun status for iteration 1 is here
       run-nt4p7-00002-674jw:
         iteration: 2
         status:
-          # TaskRun status for iteration 2 here
+          # TaskRun status for iteration 2 is here
   startTime: "2020-09-24T17:32:51Z"
 ```
 
