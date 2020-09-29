@@ -118,7 +118,7 @@ func (c *Reconciler) ReconcileKind(ctx context.Context, run *v1alpha1.Run) pkgre
 
 	status := &taskloopv1alpha1.TaskLoopRunStatus{}
 	if err := run.Status.DecodeExtraFields(status); err != nil {
-		run.Status.MarkFailed(taskloopv1alpha1.TaskLoopRunReasonInternalError.String(),
+		run.Status.MarkRunFailed(taskloopv1alpha1.TaskLoopRunReasonInternalError.String(),
 			"Internal error calling DecodeExtraFields: %v", err)
 		logger.Errorf("DecodeExtraFields error: %v", err.Error())
 	}
@@ -135,7 +135,7 @@ func (c *Reconciler) ReconcileKind(ctx context.Context, run *v1alpha1.Run) pkgre
 	}
 
 	if err := run.Status.EncodeExtraFields(status); err != nil {
-		run.Status.MarkFailed(taskloopv1alpha1.TaskLoopRunReasonInternalError.String(),
+		run.Status.MarkRunFailed(taskloopv1alpha1.TaskLoopRunReasonInternalError.String(),
 			"Internal error calling EncodeExtraFields: %v", err)
 		logger.Errorf("EncodeExtraFields error: %v", err.Error())
 	}
@@ -164,7 +164,7 @@ func (c *Reconciler) reconcile(ctx context.Context, run *v1alpha1.Run, status *t
 
 	// Validate TaskLoop spec
 	if err := taskLoopSpec.Validate(ctx); err != nil {
-		run.Status.MarkFailed(taskloopv1alpha1.TaskLoopRunReasonFailedValidation.String(),
+		run.Status.MarkRunFailed(taskloopv1alpha1.TaskLoopRunReasonFailedValidation.String(),
 			"TaskLoop %s/%s can't be Run; it has an invalid spec: %s",
 			taskLoopMeta.Namespace, taskLoopMeta.Name, err)
 		return nil
@@ -173,7 +173,7 @@ func (c *Reconciler) reconcile(ctx context.Context, run *v1alpha1.Run, status *t
 	// Determine how many iterations of the Task will be done.
 	totalIterations, err := computeIterations(run, taskLoopSpec)
 	if err != nil {
-		run.Status.MarkFailed(taskloopv1alpha1.TaskLoopRunReasonFailedValidation.String(),
+		run.Status.MarkRunFailed(taskloopv1alpha1.TaskLoopRunReasonFailedValidation.String(),
 			"Cannot determine number of iterations: %s", err)
 		return nil
 	}
@@ -195,23 +195,23 @@ func (c *Reconciler) reconcile(ctx context.Context, run *v1alpha1.Run, status *t
 					return fmt.Errorf("Failed to make patch to cancel TaskRun %s: %v", highestIterationTr.Name, err)
 				}
 				if _, err := c.pipelineClientSet.TektonV1beta1().TaskRuns(run.Namespace).Patch(highestIterationTr.Name, types.JSONPatchType, b, ""); err != nil {
-					run.Status.MarkRunning(taskloopv1alpha1.TaskLoopRunReasonCouldntCancel.String(),
+					run.Status.MarkRunRunning(taskloopv1alpha1.TaskLoopRunReasonCouldntCancel.String(),
 						"Failed to patch TaskRun `%s` with cancellation: %v", highestIterationTr.Name, err)
 					return nil
 				}
 				// Update status. It is still running until the TaskRun is actually cancelled.
-				run.Status.MarkRunning(taskloopv1alpha1.TaskLoopRunReasonRunning.String(),
+				run.Status.MarkRunRunning(taskloopv1alpha1.TaskLoopRunReasonRunning.String(),
 					"Cancelling TaskRun %s", highestIterationTr.Name)
 				return nil
 			}
-			run.Status.MarkRunning(taskloopv1alpha1.TaskLoopRunReasonRunning.String(),
+			run.Status.MarkRunRunning(taskloopv1alpha1.TaskLoopRunReasonRunning.String(),
 				"Iterations completed: %d", highestIteration-1)
 			return nil
 		}
 		// If it failed, then retry the task if possible.  Otherwise fail the Run.
 		if !highestIterationTr.IsSuccessful() {
 			if run.IsCancelled() {
-				run.Status.MarkFailed(taskloopv1alpha1.TaskLoopRunReasonCancelled.String(),
+				run.Status.MarkRunFailed(taskloopv1alpha1.TaskLoopRunReasonCancelled.String(),
 					"Run %s/%s was cancelled",
 					run.Namespace, run.Name)
 			} else {
@@ -227,7 +227,7 @@ func (c *Reconciler) reconcile(ctx context.Context, run *v1alpha1.Run, status *t
 						Status:    &highestIterationTr.Status,
 					}
 				} else {
-					run.Status.MarkFailed(taskloopv1alpha1.TaskLoopRunReasonFailed.String(),
+					run.Status.MarkRunFailed(taskloopv1alpha1.TaskLoopRunReasonFailed.String(),
 						"TaskRun %s has failed", highestIterationTr.Name)
 				}
 			}
@@ -239,14 +239,14 @@ func (c *Reconciler) reconcile(ctx context.Context, run *v1alpha1.Run, status *t
 	// Check if the Run is done.
 	nextIteration := highestIteration + 1
 	if nextIteration > totalIterations {
-		run.Status.MarkSucceeded(taskloopv1alpha1.TaskLoopRunReasonSucceeded.String(),
+		run.Status.MarkRunSucceeded(taskloopv1alpha1.TaskLoopRunReasonSucceeded.String(),
 			"All TaskRuns completed successfully")
 		return nil
 	}
 
 	// Before starting up another TaskRun, check if the run was cancelled.
 	if run.IsCancelled() {
-		run.Status.MarkFailed(taskloopv1alpha1.TaskLoopRunReasonCancelled.String(),
+		run.Status.MarkRunFailed(taskloopv1alpha1.TaskLoopRunReasonCancelled.String(),
 			"Run %s/%s was cancelled",
 			run.Namespace, run.Name)
 		return nil
@@ -263,7 +263,7 @@ func (c *Reconciler) reconcile(ctx context.Context, run *v1alpha1.Run, status *t
 		Status:    &tr.Status,
 	}
 
-	run.Status.MarkRunning(taskloopv1alpha1.TaskLoopRunReasonRunning.String(),
+	run.Status.MarkRunRunning(taskloopv1alpha1.TaskLoopRunReasonRunning.String(),
 		"Iterations completed: %d", highestIteration)
 
 	return nil
@@ -280,7 +280,7 @@ func (c *Reconciler) getTaskLoop(run *v1alpha1.Run) (*metav1.ObjectMeta, *tasklo
 		// tl, err := c.taskLoopLister.TaskLoops(run.Namespace).Get(run.Spec.Ref.Name)
 		tl, err := c.taskloopClientSet.CustomV1alpha1().TaskLoops(run.Namespace).Get(run.Spec.Ref.Name, metav1.GetOptions{})
 		if err != nil {
-			run.Status.MarkFailed(taskloopv1alpha1.TaskLoopRunReasonCouldntGetTaskLoop.String(),
+			run.Status.MarkRunFailed(taskloopv1alpha1.TaskLoopRunReasonCouldntGetTaskLoop.String(),
 				"Error retrieving TaskLoop for Run %s/%s: %s",
 				run.Namespace, run.Name, err)
 			return nil, nil, fmt.Errorf("Error retrieving TaskLoop for Run %s: %w", fmt.Sprintf("%s/%s", run.Namespace, run.Name), err)
@@ -289,7 +289,7 @@ func (c *Reconciler) getTaskLoop(run *v1alpha1.Run) (*metav1.ObjectMeta, *tasklo
 		taskLoopSpec = tl.Spec
 	} else {
 		// Run does not require name but for TaskLoop it does.
-		run.Status.MarkFailed(taskloopv1alpha1.TaskLoopRunReasonCouldntGetTaskLoop.String(),
+		run.Status.MarkRunFailed(taskloopv1alpha1.TaskLoopRunReasonCouldntGetTaskLoop.String(),
 			"Missing spec.ref.name for Run %s/%s",
 			run.Namespace, run.Name)
 		return nil, nil, fmt.Errorf("Missing spec.ref.name for Run %s", fmt.Sprintf("%s/%s", run.Namespace, run.Name))
@@ -386,7 +386,7 @@ func (c *Reconciler) updateTaskRunStatus(logger *zap.SugaredLogger, run *v1alpha
 		iterationStr := lbls[taskloop.GroupName+taskLoopIterationLabelKey]
 		iteration, err := strconv.Atoi(iterationStr)
 		if err != nil {
-			run.Status.MarkFailed(taskloopv1alpha1.TaskLoopRunReasonFailedValidation.String(),
+			run.Status.MarkRunFailed(taskloopv1alpha1.TaskLoopRunReasonFailedValidation.String(),
 				"Error converting iteration number in TaskRun %s:  %#v", tr.Name, err)
 			logger.Errorf("Error converting iteration number in TaskRun %s:  %#v", tr.Name, err)
 			return 0, nil, nil
