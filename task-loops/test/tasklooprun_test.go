@@ -36,7 +36,6 @@ import (
 	"github.com/tektoncd/pipeline/pkg/apis/pipeline/v1alpha1"
 	"github.com/tektoncd/pipeline/pkg/apis/pipeline/v1beta1"
 	"github.com/tektoncd/pipeline/pkg/pod"
-	tektontest "github.com/tektoncd/pipeline/test"
 	"github.com/tektoncd/pipeline/test/diff"
 	"gomodules.xyz/jsonpatch/v2"
 	corev1 "k8s.io/api/core/v1"
@@ -153,8 +152,9 @@ var expectedTaskRunIteration1Success = &v1beta1.TaskRun{
 		},
 	},
 	Spec: v1beta1.TaskRunSpec{
-		TaskRef: &v1beta1.TaskRef{Name: "a-task", Kind: "Task"},
-		Timeout: &metav1.Duration{Duration: 1 * time.Hour}, // default TaskRun timeout
+		ServiceAccountName: "default", // default service account name
+		TaskRef:            &v1beta1.TaskRef{Name: "a-task", Kind: "Task"},
+		Timeout:            &metav1.Duration{Duration: 1 * time.Hour}, // default TaskRun timeout
 		Params: []v1beta1.Param{{
 			Name:  "current-item",
 			Value: v1beta1.ArrayOrString{Type: v1beta1.ParamTypeString, StringVal: "item1"},
@@ -191,8 +191,9 @@ var expectedTaskRunIteration2Success = &v1beta1.TaskRun{
 		},
 	},
 	Spec: v1beta1.TaskRunSpec{
-		TaskRef: &v1beta1.TaskRef{Name: "a-task", Kind: "Task"},
-		Timeout: &metav1.Duration{Duration: 1 * time.Hour}, // default TaskRun timeout
+		ServiceAccountName: "default", // default service account name
+		TaskRef:            &v1beta1.TaskRef{Name: "a-task", Kind: "Task"},
+		Timeout:            &metav1.Duration{Duration: 1 * time.Hour}, // default TaskRun timeout
 		Params: []v1beta1.Param{{
 			Name:  "current-item",
 			Value: v1beta1.ArrayOrString{Type: v1beta1.ParamTypeString, StringVal: "item2"},
@@ -229,8 +230,9 @@ var expectedTaskRunIteration1Failure = &v1beta1.TaskRun{
 		},
 	},
 	Spec: v1beta1.TaskRunSpec{
-		TaskRef: &v1beta1.TaskRef{Name: "a-task", Kind: "Task"},
-		Timeout: &metav1.Duration{Duration: 1 * time.Hour}, // default TaskRun timeout
+		ServiceAccountName: "default", // default service account name
+		TaskRef:            &v1beta1.TaskRef{Name: "a-task", Kind: "Task"},
+		Timeout:            &metav1.Duration{Duration: 1 * time.Hour}, // default TaskRun timeout
 		Params: []v1beta1.Param{{
 			Name:  "current-item",
 			Value: v1beta1.ArrayOrString{Type: v1beta1.ParamTypeString, StringVal: "item1"},
@@ -288,11 +290,11 @@ func TestTaskLoopRun(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			tc := tc // Copy current tc to local variable due to test parallelization
 			t.Parallel()
-			c, namespace := tektontest.Setup(t)
+			c, namespace := setup(t)
 			taskLoopClient := getTaskLoopClient(t, namespace)
 
-			knativetest.CleanupOnInterrupt(func() { tektontest.TearDown(t, c, namespace) }, t.Logf)
-			defer tektontest.TearDown(t, c, namespace)
+			knativetest.CleanupOnInterrupt(func() { tearDown(t, c, namespace) }, t.Logf)
+			defer tearDown(t, c, namespace)
 
 			if tc.task != nil {
 				task := tc.task.DeepCopy()
@@ -318,16 +320,16 @@ func TestTaskLoopRun(t *testing.T) {
 			}
 
 			t.Logf("Waiting for Run %s in namespace %s to complete", run.Name, run.Namespace)
-			var inState tektontest.ConditionAccessorFn
+			var inState ConditionAccessorFn
 			var desc string
 			if tc.expectedStatus == corev1.ConditionTrue {
-				inState = tektontest.Succeed(run.Name)
+				inState = Succeed(run.Name)
 				desc = "RunSuccess"
 			} else {
-				inState = tektontest.FailedWithReason(tc.expectedReason.String(), run.Name)
+				inState = FailedWithReason(tc.expectedReason.String(), run.Name)
 				desc = "RunFailed"
 			}
-			if err := tektontest.WaitForRunState(c, run.Name, runTimeout, inState, desc); err != nil {
+			if err := WaitForRunState(c, run.Name, runTimeout, inState, desc); err != nil {
 				t.Fatalf("Error waiting for Run %s/%s to finish: %s", run.Namespace, run.Name, err)
 			}
 
@@ -418,12 +420,12 @@ func TestTaskLoopRun(t *testing.T) {
 
 func TestCancelTaskLoopRun(t *testing.T) {
 	t.Run("cancel", func(t *testing.T) {
-		c, namespace := tektontest.Setup(t)
+		c, namespace := setup(t)
 		taskLoopClient := getTaskLoopClient(t, namespace)
 		t.Parallel()
 
-		knativetest.CleanupOnInterrupt(func() { tektontest.TearDown(t, c, namespace) }, t.Logf)
-		defer tektontest.TearDown(t, c, namespace)
+		knativetest.CleanupOnInterrupt(func() { tearDown(t, c, namespace) }, t.Logf)
+		defer tearDown(t, c, namespace)
 
 		a_taskloop := &taskloopv1alpha1.TaskLoop{
 			ObjectMeta: metav1.ObjectMeta{Name: "sleep", Namespace: namespace},
@@ -470,7 +472,7 @@ func TestCancelTaskLoopRun(t *testing.T) {
 		}
 
 		t.Logf("Waiting for Run %s in namespace %s to be started", run.Name, namespace)
-		if err := tektontest.WaitForRunState(c, run.Name, runTimeout, tektontest.Running(run.Name), "RunRunning"); err != nil {
+		if err := WaitForRunState(c, run.Name, runTimeout, Running(run.Name), "RunRunning"); err != nil {
 			t.Fatalf("Error waiting for Run %s to be running: %s", run.Name, err)
 		}
 
@@ -487,7 +489,7 @@ func TestCancelTaskLoopRun(t *testing.T) {
 			wg.Add(1)
 			go func(name string) {
 				defer wg.Done()
-				err := tektontest.WaitForTaskRunState(c, name, tektontest.Running(name), "TaskRunRunning")
+				err := WaitForTaskRunState(c, name, Running(name), "TaskRunRunning")
 				if err != nil {
 					t.Errorf("Error waiting for TaskRun %s to be running: %v", name, err)
 				}
@@ -514,8 +516,8 @@ func TestCancelTaskLoopRun(t *testing.T) {
 		}
 
 		t.Logf("Waiting for Run %s in namespace %s to be cancelled", run.Name, namespace)
-		if err := tektontest.WaitForRunState(c, run.Name, runTimeout,
-			tektontest.FailedWithReason(taskloopv1alpha1.TaskLoopRunReasonCancelled.String(), run.Name), "RunCancelled"); err != nil {
+		if err := WaitForRunState(c, run.Name, runTimeout,
+			FailedWithReason(taskloopv1alpha1.TaskLoopRunReasonCancelled.String(), run.Name), "RunCancelled"); err != nil {
 			t.Errorf("Error waiting for Run %q to finished: %s", run.Name, err)
 		}
 
@@ -524,7 +526,7 @@ func TestCancelTaskLoopRun(t *testing.T) {
 			wg.Add(1)
 			go func(name string) {
 				defer wg.Done()
-				err := tektontest.WaitForTaskRunState(c, name, tektontest.FailedWithReason("TaskRunCancelled", name), "TaskRunCancelled")
+				err := WaitForTaskRunState(c, name, FailedWithReason("TaskRunCancelled", name), "TaskRunCancelled")
 				if err != nil {
 					t.Errorf("Error waiting for TaskRun %s to be finished: %v", name, err)
 				}

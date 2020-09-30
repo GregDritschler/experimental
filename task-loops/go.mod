@@ -3,6 +3,7 @@ module github.com/tektoncd/experimental/task-loops
 go 1.13
 
 require (
+	github.com/ghodss/yaml v1.0.0
 	github.com/google/go-cmp v0.5.2
 	github.com/hashicorp/go-multierror v1.1.0
 	github.com/tektoncd/pipeline v0.15.2
