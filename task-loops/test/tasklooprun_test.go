@@ -290,20 +290,6 @@ var expectedTaskRunIteration1Failure = &v1beta1.TaskRun{
 func TestTaskLoopRun(t *testing.T) {
 	t.Parallel()
 
-	// Create expected TaskRuns for inline task case.  The only difference is there is a task spec instead of a task reference.
-	expectedTaskRunIteration1SuccessInlineTask := expectedTaskRunIteration1Success.DeepCopy()
-	expectedTaskRunIteration1SuccessInlineTask.Spec.TaskRef = nil
-	expectedTaskRunIteration1SuccessInlineTask.Spec.TaskSpec = &commonTaskSpec
-	expectedTaskRunIteration2SuccessInlineTask := expectedTaskRunIteration2Success.DeepCopy()
-	expectedTaskRunIteration2SuccessInlineTask.Spec.TaskRef = nil
-	expectedTaskRunIteration2SuccessInlineTask.Spec.TaskSpec = &commonTaskSpec
-
-	// Create expected TaskRuns for cluster task case.  The only difference is the task reference is to a ClusterTask rather than a Task.
-	expectedTaskRunIteration1SuccessClusterTask := expectedTaskRunIteration1Success.DeepCopy()
-	expectedTaskRunIteration1SuccessClusterTask.Spec.TaskRef = &v1beta1.TaskRef{Name: clusterTaskName, Kind: "ClusterTask"}
-	expectedTaskRunIteration2SuccessClusterTask := expectedTaskRunIteration2Success.DeepCopy()
-	expectedTaskRunIteration2SuccessClusterTask.Spec.TaskRef = &v1beta1.TaskRef{Name: clusterTaskName, Kind: "ClusterTask"}
-
 	testcases := []struct {
 		name string
 		// The following set of fields describe the resources to create.
@@ -335,22 +321,28 @@ func TestTaskLoopRun(t *testing.T) {
 		expectedTaskruns: []*v1beta1.TaskRun{expectedTaskRunIteration1Failure},
 		expectedEvents:   []string{startedEventMessage, "Iterations completed: 0", "TaskRun run-taskloop-00001-.* has failed"},
 	}, {
-		name:             "successful TaskLoop using an inline task",
-		taskloop:         aTaskLoopUsingAnInlineTask,
-		run:              runTaskLoopUsingAnInlineTaskSuccess,
-		expectedStatus:   corev1.ConditionTrue,
-		expectedReason:   taskloopv1alpha1.TaskLoopRunReasonSucceeded,
-		expectedTaskruns: []*v1beta1.TaskRun{expectedTaskRunIteration1SuccessInlineTask, expectedTaskRunIteration2SuccessInlineTask},
-		expectedEvents:   []string{startedEventMessage, "Iterations completed: 0", "Iterations completed: 1", "All TaskRuns completed successfully"},
+		name:           "successful TaskLoop using an inline task",
+		taskloop:       aTaskLoopUsingAnInlineTask,
+		run:            runTaskLoopUsingAnInlineTaskSuccess,
+		expectedStatus: corev1.ConditionTrue,
+		expectedReason: taskloopv1alpha1.TaskLoopRunReasonSucceeded,
+		expectedTaskruns: []*v1beta1.TaskRun{
+			getExpectedTaskRunForInlineTask(expectedTaskRunIteration1Success),
+			getExpectedTaskRunForInlineTask(expectedTaskRunIteration2Success),
+		},
+		expectedEvents: []string{startedEventMessage, "Iterations completed: 0", "Iterations completed: 1", "All TaskRuns completed successfully"},
 	}, {
-		name:             "successful TaskLoop using a cluster task",
-		clustertask:      aClusterTask,
-		taskloop:         aTaskLoopUsingAClusterTask,
-		run:              runTaskLoopUsingAClusterTaskSuccess,
-		expectedStatus:   corev1.ConditionTrue,
-		expectedReason:   taskloopv1alpha1.TaskLoopRunReasonSucceeded,
-		expectedTaskruns: []*v1beta1.TaskRun{expectedTaskRunIteration1SuccessClusterTask, expectedTaskRunIteration2SuccessClusterTask},
-		expectedEvents:   []string{startedEventMessage, "Iterations completed: 0", "Iterations completed: 1", "All TaskRuns completed successfully"},
+		name:           "successful TaskLoop using a cluster task",
+		clustertask:    aClusterTask,
+		taskloop:       aTaskLoopUsingAClusterTask,
+		run:            runTaskLoopUsingAClusterTaskSuccess,
+		expectedStatus: corev1.ConditionTrue,
+		expectedReason: taskloopv1alpha1.TaskLoopRunReasonSucceeded,
+		expectedTaskruns: []*v1beta1.TaskRun{
+			getExpectedTaskRunForClusterTask(expectedTaskRunIteration1Success),
+			getExpectedTaskRunForClusterTask(expectedTaskRunIteration2Success),
+		},
+		expectedEvents: []string{startedEventMessage, "Iterations completed: 0", "Iterations completed: 1", "All TaskRuns completed successfully"},
 	}}
 
 	for _, tc := range testcases {
@@ -375,6 +367,8 @@ func TestTaskLoopRun(t *testing.T) {
 				if _, err := c.ClusterTaskClient.Create(tc.clustertask); err != nil {
 					t.Fatalf("Failed to create ClusterTask `%s`: %s", tc.clustertask.Name, err)
 				}
+				knativetest.CleanupOnInterrupt(func() { deleteClusterTask(t, c, tc.clustertask.Name) }, t.Logf)
+				defer deleteClusterTask(t, c, tc.clustertask.Name)
 			}
 
 			if tc.taskloop != nil {
@@ -626,6 +620,21 @@ func getTaskLoopClient(t *testing.T, namespace string) resourceversioned.TaskLoo
 	return cs.CustomV1alpha1().TaskLoops(namespace)
 }
 
+func getExpectedTaskRunForInlineTask(expectedTaskRun *v1beta1.TaskRun) *v1beta1.TaskRun {
+	// Change expected TaskRun for inline task case.  The only difference is there is a task spec instead of a task reference.
+	expectedTaskRun = expectedTaskRun.DeepCopy()
+	expectedTaskRun.Spec.TaskRef = nil
+	expectedTaskRun.Spec.TaskSpec = &commonTaskSpec
+	return expectedTaskRun
+}
+
+func getExpectedTaskRunForClusterTask(expectedTaskRun *v1beta1.TaskRun) *v1beta1.TaskRun {
+	// Change expected TaskRun for cluster task case.  The only difference is the task reference is to a ClusterTask rather than a Task.
+	expectedTaskRun = expectedTaskRun.DeepCopy()
+	expectedTaskRun.Spec.TaskRef = &v1beta1.TaskRef{Name: clusterTaskName, Kind: "ClusterTask"}
+	return expectedTaskRun
+}
+
 func getExpectedTaskRunAnnotations(taskloop *taskloopv1alpha1.TaskLoop, run *v1alpha1.Run) map[string]string {
 	annotations := make(map[string]string, len(taskloop.ObjectMeta.Annotations)+len(run.ObjectMeta.Annotations))
 	for key, value := range taskloop.ObjectMeta.Labels {
@@ -688,5 +697,16 @@ func collectMatchingEvents(kubeClient *knativetest.KubeClient, namespace string,
 		case <-timer.C:
 			return events, nil
 		}
+	}
+}
+
+// deleteClusterTask removes a single clustertask by name using provided
+// clientset. Test state is used for logging. deleteClusterTask does not wait
+// for the clustertask to be deleted, so it is still possible to have name
+// conflicts during test
+func deleteClusterTask(t *testing.T, c *clients, name string) {
+	t.Logf("Deleting clustertask %s", name)
+	if err := c.ClusterTaskClient.Delete(name, &metav1.DeleteOptions{}); err != nil {
+		t.Fatalf("Failed to delete clustertask: %v", err)
 	}
 }
