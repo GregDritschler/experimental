@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -35,6 +36,7 @@ import (
 	resourceversioned "github.com/tektoncd/experimental/task-loops/pkg/client/clientset/versioned/typed/taskloop/v1alpha1"
 	"github.com/tektoncd/pipeline/pkg/apis/pipeline/v1alpha1"
 	"github.com/tektoncd/pipeline/pkg/apis/pipeline/v1beta1"
+	"github.com/tektoncd/pipeline/pkg/names"
 	"github.com/tektoncd/pipeline/pkg/pod"
 	"github.com/tektoncd/pipeline/test/diff"
 	"gomodules.xyz/jsonpatch/v2"
@@ -54,31 +56,72 @@ var (
 	}
 )
 
+var commonTaskSpec = v1beta1.TaskSpec{
+	Params: []v1beta1.ParamSpec{{
+		Name: "current-item",
+		Type: v1beta1.ParamTypeString,
+	}, {
+		Name:    "fail-on-item",
+		Type:    v1beta1.ParamTypeString,
+		Default: &v1beta1.ArrayOrString{Type: v1beta1.ParamTypeString, StringVal: ""},
+	}},
+	Steps: []v1beta1.Step{{
+		Container: corev1.Container{
+			Name:    "passfail",
+			Image:   "ubuntu",
+			Command: []string{"/bin/bash"},
+			Args:    []string{"-c", `[[ "$(params.fail-on-item)" == "" || "$(params.current-item)" != "$(params.fail-on-item)" ]]`},
+		},
+	}},
+}
+
 var aTask = &v1beta1.Task{
 	ObjectMeta: metav1.ObjectMeta{Name: "a-task"},
-	Spec: v1beta1.TaskSpec{
-		Params: []v1beta1.ParamSpec{{
-			Name: "current-item",
-			Type: v1beta1.ParamTypeString,
-		}, {
-			Name: "fail-on-item",
-			Type: v1beta1.ParamTypeString,
-		}},
-		Steps: []v1beta1.Step{{
-			Container: corev1.Container{
-				Name:    "passfail",
-				Image:   "ubuntu",
-				Command: []string{"/bin/bash"},
-				Args:    []string{"-c", "[[ $(params.current-item) != $(params.fail-on-item) ]]"},
-			},
-		}},
-	},
+	Spec:       commonTaskSpec,
+}
+
+// Create cluster task name with randomized suffix to avoid name clashes
+var clusterTaskName = names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("a-cluster-task")
+
+var aClusterTask = &v1beta1.ClusterTask{
+	ObjectMeta: metav1.ObjectMeta{Name: clusterTaskName},
+	Spec:       commonTaskSpec,
 }
 
 var aTaskLoop = &taskloopv1alpha1.TaskLoop{
-	ObjectMeta: metav1.ObjectMeta{Name: "a-taskloop"},
+	ObjectMeta: metav1.ObjectMeta{
+		Name: "a-taskloop",
+		Labels: map[string]string{
+			"myTaskLoopLabel": "myTaskLoopLabelValue",
+		},
+		Annotations: map[string]string{
+			"myTaskLoopAnnotation": "myTaskLoopAnnotationValue",
+		},
+	},
 	Spec: taskloopv1alpha1.TaskLoopSpec{
 		TaskRef:      &v1beta1.TaskRef{Name: "a-task"},
+		IterateParam: "current-item",
+	},
+}
+
+var aTaskLoopUsingAnInlineTask = &taskloopv1alpha1.TaskLoop{
+	ObjectMeta: metav1.ObjectMeta{
+		Name: "a-taskloop-using-an-inline-task",
+		// No labels or annotations in this one to test that case works
+	},
+	Spec: taskloopv1alpha1.TaskLoopSpec{
+		TaskSpec:     &commonTaskSpec,
+		IterateParam: "current-item",
+	},
+}
+
+var aTaskLoopUsingAClusterTask = &taskloopv1alpha1.TaskLoop{
+	ObjectMeta: metav1.ObjectMeta{
+		Name: "a-taskloop-using-a-cluster-task",
+		// No labels or annotations in this one to test that case works
+	},
+	Spec: taskloopv1alpha1.TaskLoopSpec{
+		TaskRef:      &v1beta1.TaskRef{Name: clusterTaskName, Kind: "ClusterTask"},
 		IterateParam: "current-item",
 	},
 }
@@ -87,19 +130,16 @@ var runTaskLoopSuccess = &v1alpha1.Run{
 	ObjectMeta: metav1.ObjectMeta{
 		Name: "run-taskloop",
 		Labels: map[string]string{
-			"myTestLabel": "myTestLabelValue",
+			"myRunLabel": "myRunLabelValue",
 		},
 		Annotations: map[string]string{
-			"myTestAnnotation": "myTestAnnotationValue",
+			"myRunAnnotation": "myRunAnnotationValue",
 		},
 	},
 	Spec: v1alpha1.RunSpec{
 		Params: []v1beta1.Param{{
 			Name:  "current-item",
 			Value: v1beta1.ArrayOrString{Type: v1beta1.ParamTypeArray, ArrayVal: []string{"item1", "item2"}},
-		}, {
-			Name:  "fail-on-item",
-			Value: v1beta1.ArrayOrString{Type: v1beta1.ParamTypeString, StringVal: "dontfailonanyitem"},
 		}},
 		Ref: &v1alpha1.TaskRef{
 			APIVersion: taskloopv1alpha1.SchemeGroupVersion.String(),
@@ -113,10 +153,10 @@ var runTaskLoopFailure = &v1alpha1.Run{
 	ObjectMeta: metav1.ObjectMeta{
 		Name: "run-taskloop",
 		Labels: map[string]string{
-			"myTestLabel": "myTestLabelValue",
+			"myRunLabel": "myRunLabelValue",
 		},
 		Annotations: map[string]string{
-			"myTestAnnotation": "myTestAnnotationValue",
+			"myRunAnnotation": "myRunAnnotationValue",
 		},
 	},
 	Spec: v1alpha1.RunSpec{
@@ -135,21 +175,62 @@ var runTaskLoopFailure = &v1alpha1.Run{
 	},
 }
 
+var runTaskLoopUsingAnInlineTaskSuccess = &v1alpha1.Run{
+	ObjectMeta: metav1.ObjectMeta{
+		Name: "run-taskloop",
+		// No labels or annotations in this one to test that case works
+	},
+	Spec: v1alpha1.RunSpec{
+		Params: []v1beta1.Param{{
+			Name:  "current-item",
+			Value: v1beta1.ArrayOrString{Type: v1beta1.ParamTypeArray, ArrayVal: []string{"item1", "item2"}},
+		}},
+		Ref: &v1alpha1.TaskRef{
+			APIVersion: taskloopv1alpha1.SchemeGroupVersion.String(),
+			Kind:       taskloop.TaskLoopControllerName,
+			Name:       "a-taskloop-using-an-inline-task",
+		},
+	},
+}
+
+var runTaskLoopUsingAClusterTaskSuccess = &v1alpha1.Run{
+	ObjectMeta: metav1.ObjectMeta{
+		Name: "run-taskloop",
+		// No labels or annotations in this one to test that case works
+	},
+	Spec: v1alpha1.RunSpec{
+		Params: []v1beta1.Param{{
+			Name:  "current-item",
+			Value: v1beta1.ArrayOrString{Type: v1beta1.ParamTypeArray, ArrayVal: []string{"item1", "item2"}},
+		}},
+		Ref: &v1alpha1.TaskRef{
+			APIVersion: taskloopv1alpha1.SchemeGroupVersion.String(),
+			Kind:       taskloop.TaskLoopControllerName,
+			Name:       "a-taskloop-using-a-cluster-task",
+		},
+	},
+}
+
+var taskRunStatusSuccess = duckv1beta1.Status{
+	Conditions: []apis.Condition{{
+		Type:   apis.ConditionSucceeded,
+		Status: corev1.ConditionTrue,
+		Reason: v1beta1.TaskRunReasonSuccessful.String(),
+	}},
+}
+
+var taskRunStatusFailed = duckv1beta1.Status{
+	Conditions: []apis.Condition{{
+		Type:   apis.ConditionSucceeded,
+		Status: corev1.ConditionFalse,
+		Reason: v1beta1.TaskRunReasonFailed.String(),
+	}},
+}
+
 var expectedTaskRunIteration1Success = &v1beta1.TaskRun{
 	ObjectMeta: metav1.ObjectMeta{
-		Name:      "run-taskloop-00001-", // does not include random suffix
-		Namespace: "foo",
-		Labels: map[string]string{
-			"app.kubernetes.io/managed-by":        "tekton-pipelines",
-			"tekton.dev/run":                      "run-taskloop",
-			"tekton.dev/task":                     "a-task",
-			"custom.tekton.dev/taskLoop":          "a-taskloop",
-			"custom.tekton.dev/taskLoopIteration": "1",
-			"myTestLabel":                         "myTestLabelValue",
-		},
-		Annotations: map[string]string{
-			"myTestAnnotation": "myTestAnnotationValue",
-		},
+		Name: "run-taskloop-00001-", // does not include random suffix
+		// Expected labels and annotations are added dynamically
 	},
 	Spec: v1beta1.TaskRunSpec{
 		ServiceAccountName: "default", // default service account name
@@ -158,37 +239,17 @@ var expectedTaskRunIteration1Success = &v1beta1.TaskRun{
 		Params: []v1beta1.Param{{
 			Name:  "current-item",
 			Value: v1beta1.ArrayOrString{Type: v1beta1.ParamTypeString, StringVal: "item1"},
-		}, {
-			Name:  "fail-on-item",
-			Value: v1beta1.ArrayOrString{Type: v1beta1.ParamTypeString, StringVal: "dontfailonanyitem"},
 		}},
 	},
 	Status: v1beta1.TaskRunStatus{
-		Status: duckv1beta1.Status{
-			Conditions: []apis.Condition{{
-				Type:   apis.ConditionSucceeded,
-				Status: corev1.ConditionTrue,
-				Reason: v1beta1.TaskRunReasonSuccessful.String(),
-			}},
-		},
+		Status: taskRunStatusSuccess,
 	},
 }
 
 var expectedTaskRunIteration2Success = &v1beta1.TaskRun{
 	ObjectMeta: metav1.ObjectMeta{
-		Name:      "run-taskloop-00002-", // does not include random suffix
-		Namespace: "foo",
-		Labels: map[string]string{
-			"app.kubernetes.io/managed-by":        "tekton-pipelines",
-			"tekton.dev/run":                      "run-taskloop",
-			"tekton.dev/task":                     "a-task",
-			"custom.tekton.dev/taskLoop":          "a-taskloop",
-			"custom.tekton.dev/taskLoopIteration": "2",
-			"myTestLabel":                         "myTestLabelValue",
-		},
-		Annotations: map[string]string{
-			"myTestAnnotation": "myTestAnnotationValue",
-		},
+		Name: "run-taskloop-00002-", // does not include random suffix
+		// Expected labels and annotations are added dynamically
 	},
 	Spec: v1beta1.TaskRunSpec{
 		ServiceAccountName: "default", // default service account name
@@ -197,37 +258,17 @@ var expectedTaskRunIteration2Success = &v1beta1.TaskRun{
 		Params: []v1beta1.Param{{
 			Name:  "current-item",
 			Value: v1beta1.ArrayOrString{Type: v1beta1.ParamTypeString, StringVal: "item2"},
-		}, {
-			Name:  "fail-on-item",
-			Value: v1beta1.ArrayOrString{Type: v1beta1.ParamTypeString, StringVal: "dontfailonanyitem"},
 		}},
 	},
 	Status: v1beta1.TaskRunStatus{
-		Status: duckv1beta1.Status{
-			Conditions: []apis.Condition{{
-				Type:   apis.ConditionSucceeded,
-				Status: corev1.ConditionTrue,
-				Reason: v1beta1.TaskRunReasonSuccessful.String(),
-			}},
-		},
+		Status: taskRunStatusSuccess,
 	},
 }
 
 var expectedTaskRunIteration1Failure = &v1beta1.TaskRun{
 	ObjectMeta: metav1.ObjectMeta{
-		Name:      "run-taskloop-00001-", // does not include random suffix
-		Namespace: "foo",
-		Labels: map[string]string{
-			"app.kubernetes.io/managed-by":        "tekton-pipelines",
-			"tekton.dev/run":                      "run-taskloop",
-			"tekton.dev/task":                     "a-task",
-			"custom.tekton.dev/taskLoop":          "a-taskloop",
-			"custom.tekton.dev/taskLoopIteration": "1",
-			"myTestLabel":                         "myTestLabelValue",
-		},
-		Annotations: map[string]string{
-			"myTestAnnotation": "myTestAnnotationValue",
-		},
+		Name: "run-taskloop-00001-", // does not include random suffix
+		// Expected labels and annotations are added dynamically
 	},
 	Spec: v1beta1.TaskRunSpec{
 		ServiceAccountName: "default", // default service account name
@@ -242,25 +283,34 @@ var expectedTaskRunIteration1Failure = &v1beta1.TaskRun{
 		}},
 	},
 	Status: v1beta1.TaskRunStatus{
-		Status: duckv1beta1.Status{
-			Conditions: []apis.Condition{{
-				Type:   apis.ConditionSucceeded,
-				Status: corev1.ConditionFalse,
-				Reason: v1beta1.TaskRunReasonFailed.String(),
-			}},
-		},
+		Status: taskRunStatusFailed,
 	},
 }
 
 func TestTaskLoopRun(t *testing.T) {
 	t.Parallel()
 
+	// Create expected TaskRuns for inline task case.  The only difference is there is a task spec instead of a task reference.
+	expectedTaskRunIteration1SuccessInlineTask := expectedTaskRunIteration1Success.DeepCopy()
+	expectedTaskRunIteration1SuccessInlineTask.Spec.TaskRef = nil
+	expectedTaskRunIteration1SuccessInlineTask.Spec.TaskSpec = &commonTaskSpec
+	expectedTaskRunIteration2SuccessInlineTask := expectedTaskRunIteration2Success.DeepCopy()
+	expectedTaskRunIteration2SuccessInlineTask.Spec.TaskRef = nil
+	expectedTaskRunIteration2SuccessInlineTask.Spec.TaskSpec = &commonTaskSpec
+
+	// Create expected TaskRuns for cluster task case.  The only difference is the task reference is to a ClusterTask rather than a Task.
+	expectedTaskRunIteration1SuccessClusterTask := expectedTaskRunIteration1Success.DeepCopy()
+	expectedTaskRunIteration1SuccessClusterTask.Spec.TaskRef = &v1beta1.TaskRef{Name: clusterTaskName, Kind: "ClusterTask"}
+	expectedTaskRunIteration2SuccessClusterTask := expectedTaskRunIteration2Success.DeepCopy()
+	expectedTaskRunIteration2SuccessClusterTask.Spec.TaskRef = &v1beta1.TaskRef{Name: clusterTaskName, Kind: "ClusterTask"}
+
 	testcases := []struct {
 		name string
 		// The following set of fields describe the resources to create.
-		task     *v1beta1.Task
-		taskloop *taskloopv1alpha1.TaskLoop
-		run      *v1alpha1.Run
+		task        *v1beta1.Task
+		clustertask *v1beta1.ClusterTask
+		taskloop    *taskloopv1alpha1.TaskLoop
+		run         *v1alpha1.Run
 		// The following set of fields describe the expected outcome.
 		expectedStatus   corev1.ConditionStatus
 		expectedReason   taskloopv1alpha1.TaskLoopRunReason
@@ -284,6 +334,23 @@ func TestTaskLoopRun(t *testing.T) {
 		expectedReason:   taskloopv1alpha1.TaskLoopRunReasonFailed,
 		expectedTaskruns: []*v1beta1.TaskRun{expectedTaskRunIteration1Failure},
 		expectedEvents:   []string{startedEventMessage, "Iterations completed: 0", "TaskRun run-taskloop-00001-.* has failed"},
+	}, {
+		name:             "successful TaskLoop using an inline task",
+		taskloop:         aTaskLoopUsingAnInlineTask,
+		run:              runTaskLoopUsingAnInlineTaskSuccess,
+		expectedStatus:   corev1.ConditionTrue,
+		expectedReason:   taskloopv1alpha1.TaskLoopRunReasonSucceeded,
+		expectedTaskruns: []*v1beta1.TaskRun{expectedTaskRunIteration1SuccessInlineTask, expectedTaskRunIteration2SuccessInlineTask},
+		expectedEvents:   []string{startedEventMessage, "Iterations completed: 0", "Iterations completed: 1", "All TaskRuns completed successfully"},
+	}, {
+		name:             "successful TaskLoop using a cluster task",
+		clustertask:      aClusterTask,
+		taskloop:         aTaskLoopUsingAClusterTask,
+		run:              runTaskLoopUsingAClusterTaskSuccess,
+		expectedStatus:   corev1.ConditionTrue,
+		expectedReason:   taskloopv1alpha1.TaskLoopRunReasonSucceeded,
+		expectedTaskruns: []*v1beta1.TaskRun{expectedTaskRunIteration1SuccessClusterTask, expectedTaskRunIteration2SuccessClusterTask},
+		expectedEvents:   []string{startedEventMessage, "Iterations completed: 0", "Iterations completed: 1", "All TaskRuns completed successfully"},
 	}}
 
 	for _, tc := range testcases {
@@ -301,6 +368,12 @@ func TestTaskLoopRun(t *testing.T) {
 				task.Namespace = namespace
 				if _, err := c.TaskClient.Create(task); err != nil {
 					t.Fatalf("Failed to create Task `%s`: %s", task.Name, err)
+				}
+			}
+
+			if tc.clustertask != nil {
+				if _, err := c.ClusterTaskClient.Create(tc.clustertask); err != nil {
+					t.Fatalf("Failed to create ClusterTask `%s`: %s", tc.clustertask.Name, err)
 				}
 			}
 
@@ -355,6 +428,9 @@ func TestTaskLoopRun(t *testing.T) {
 				t.Errorf("DecodeExtraFields error: %v", err.Error())
 			}
 			for i, expectedTaskrun := range tc.expectedTaskruns {
+				expectedTaskrun = expectedTaskrun.DeepCopy()
+				expectedTaskrun.ObjectMeta.Annotations = getExpectedTaskRunAnnotations(tc.taskloop, run)
+				expectedTaskrun.ObjectMeta.Labels = getExpectedTaskRunLabels(tc.task, tc.clustertask, tc.taskloop, run, i+1)
 				var actualTaskrun v1beta1.TaskRun
 				found := false
 				for _, actualTaskrun = range actualTaskrunList.Items {
@@ -548,6 +624,39 @@ func getTaskLoopClient(t *testing.T, namespace string) resourceversioned.TaskLoo
 		t.Fatalf("failed to create taskloop clientset from config file at %s: %s", configPath, err)
 	}
 	return cs.CustomV1alpha1().TaskLoops(namespace)
+}
+
+func getExpectedTaskRunAnnotations(taskloop *taskloopv1alpha1.TaskLoop, run *v1alpha1.Run) map[string]string {
+	annotations := make(map[string]string, len(taskloop.ObjectMeta.Annotations)+len(run.ObjectMeta.Annotations))
+	for key, value := range taskloop.ObjectMeta.Labels {
+		run.ObjectMeta.Labels[key] = value
+	}
+	for key, val := range run.ObjectMeta.Annotations {
+		annotations[key] = val
+	}
+	return annotations
+}
+
+func getExpectedTaskRunLabels(task *v1beta1.Task, clustertask *v1beta1.ClusterTask, taskloop *taskloopv1alpha1.TaskLoop, run *v1alpha1.Run, iteration int) map[string]string {
+	labels := map[string]string{
+		"app.kubernetes.io/managed-by":        "tekton-pipelines",
+		"tekton.dev/run":                      run.Name,
+		"custom.tekton.dev/taskLoop":          taskloop.Name,
+		"custom.tekton.dev/taskLoopIteration": strconv.Itoa(iteration),
+	}
+	if task != nil {
+		labels["tekton.dev/task"] = task.Name
+	} else if clustertask != nil {
+		labels["tekton.dev/task"] = clustertask.Name
+		labels["tekton.dev/clusterTask"] = clustertask.Name
+	}
+	for key, value := range taskloop.ObjectMeta.Labels {
+		labels[key] = value
+	}
+	for key, value := range run.ObjectMeta.Labels {
+		labels[key] = value
+	}
+	return labels
 }
 
 // collectMatchingEvents collects a list of events under 5 seconds that match certain objects by kind and name.
