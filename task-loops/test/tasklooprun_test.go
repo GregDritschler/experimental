@@ -49,13 +49,16 @@ import (
 )
 
 var (
+	numRetries              = 2 // number of task retries to test
 	runTimeout              = 10 * time.Minute
 	startedEventMessage     = "" // Run started event has no message
+	taskTimeout             = &metav1.Duration{Duration: 10 * time.Second}
 	ignoreReleaseAnnotation = func(k string, v string) bool {
 		return k == pod.ReleaseAnnotation
 	}
 )
 
+// commonTaskSpec is reused in Task, Cluster Task, and inline task
 var commonTaskSpec = v1beta1.TaskSpec{
 	Params: []v1beta1.ParamSpec{{
 		Name: "current-item",
@@ -227,6 +230,14 @@ var taskRunStatusFailed = duckv1beta1.Status{
 	}},
 }
 
+var taskRunStatusTimeout = duckv1beta1.Status{
+	Conditions: []apis.Condition{{
+		Type:   apis.ConditionSucceeded,
+		Status: corev1.ConditionFalse,
+		Reason: v1beta1.TaskRunReasonTimedOut.String(),
+	}},
+}
+
 var expectedTaskRunIteration1Success = &v1beta1.TaskRun{
 	ObjectMeta: metav1.ObjectMeta{
 		Name: "run-taskloop-00001-", // does not include random suffix
@@ -287,6 +298,59 @@ var expectedTaskRunIteration1Failure = &v1beta1.TaskRun{
 	},
 }
 
+var sleepyTaskLoop = &taskloopv1alpha1.TaskLoop{
+	ObjectMeta: metav1.ObjectMeta{Name: "sleepyloop"},
+	Spec: taskloopv1alpha1.TaskLoopSpec{
+		TaskSpec: &v1beta1.TaskSpec{
+			Params: []v1beta1.ParamSpec{{
+				Name: "sleep-time",
+				Type: v1beta1.ParamTypeString,
+			}},
+			Steps: []v1beta1.Step{{
+				Container: corev1.Container{
+					Image: "busybox",
+				},
+				Script: "sleep $(params.sleep-time)",
+			}},
+		},
+		IterateParam: "sleep-time",
+	},
+}
+
+var runSleepyTaskLoop = &v1alpha1.Run{
+	ObjectMeta: metav1.ObjectMeta{Name: "run-sleepy"},
+	Spec: v1alpha1.RunSpec{
+		Params: []v1beta1.Param{{
+			Name:  "sleep-time",
+			Value: v1beta1.ArrayOrString{Type: v1beta1.ParamTypeArray, ArrayVal: []string{"120", "120"}},
+		}},
+		Ref: &v1alpha1.TaskRef{
+			APIVersion: taskloopv1alpha1.SchemeGroupVersion.String(),
+			Kind:       taskloop.TaskLoopControllerName,
+			Name:       "sleepyloop",
+		},
+	},
+}
+
+var expectedTaskRunIteration1Timeout = &v1beta1.TaskRun{
+	ObjectMeta: metav1.ObjectMeta{
+		Name: "run-sleepy-00001-", // does not include random suffix
+		// Expected labels and annotations are added dynamically
+	},
+	Spec: v1beta1.TaskRunSpec{
+		ServiceAccountName: "default", // default service account name
+		Timeout:            taskTimeout,
+		TaskSpec:           sleepyTaskLoop.Spec.TaskSpec,
+		Params: []v1beta1.Param{{
+			Name:  "sleep-time",
+			Value: v1beta1.ArrayOrString{Type: v1beta1.ParamTypeString, StringVal: "120"},
+		}},
+	},
+	Status: v1beta1.TaskRunStatus{
+		Status: taskRunStatusTimeout,
+	},
+}
+
 func TestTaskLoopRun(t *testing.T) {
 	t.Parallel()
 
@@ -300,8 +364,10 @@ func TestTaskLoopRun(t *testing.T) {
 		// The following set of fields describe the expected outcome.
 		expectedStatus   corev1.ConditionStatus
 		expectedReason   taskloopv1alpha1.TaskLoopRunReason
-		expectedTaskruns []*v1beta1.TaskRun
+		expectedTaskRuns []*v1beta1.TaskRun
 		expectedEvents   []string
+		// This function can perform additional checks on the TaskRun.  It is passed the expected and actual TaskRuns.
+		extraTaskRunChecks func(*testing.T, *v1beta1.TaskRun, *v1beta1.TaskRun)
 	}{{
 		name:             "successful TaskLoop",
 		task:             aTask,
@@ -309,7 +375,7 @@ func TestTaskLoopRun(t *testing.T) {
 		run:              runTaskLoopSuccess,
 		expectedStatus:   corev1.ConditionTrue,
 		expectedReason:   taskloopv1alpha1.TaskLoopRunReasonSucceeded,
-		expectedTaskruns: []*v1beta1.TaskRun{expectedTaskRunIteration1Success, expectedTaskRunIteration2Success},
+		expectedTaskRuns: []*v1beta1.TaskRun{expectedTaskRunIteration1Success, expectedTaskRunIteration2Success},
 		expectedEvents:   []string{startedEventMessage, "Iterations completed: 0", "Iterations completed: 1", "All TaskRuns completed successfully"},
 	}, {
 		name:             "failed TaskLoop",
@@ -318,15 +384,33 @@ func TestTaskLoopRun(t *testing.T) {
 		run:              runTaskLoopFailure,
 		expectedStatus:   corev1.ConditionFalse,
 		expectedReason:   taskloopv1alpha1.TaskLoopRunReasonFailed,
-		expectedTaskruns: []*v1beta1.TaskRun{expectedTaskRunIteration1Failure},
+		expectedTaskRuns: []*v1beta1.TaskRun{expectedTaskRunIteration1Failure},
 		expectedEvents:   []string{startedEventMessage, "Iterations completed: 0", "TaskRun run-taskloop-00001-.* has failed"},
+	}, {
+		name:               "failed TaskLoop with retries",
+		task:               aTask,
+		taskloop:           getTaskLoopWithRetries(aTaskLoop),
+		run:                runTaskLoopFailure,
+		expectedStatus:     corev1.ConditionFalse,
+		expectedReason:     taskloopv1alpha1.TaskLoopRunReasonFailed,
+		expectedTaskRuns:   []*v1beta1.TaskRun{expectedTaskRunIteration1Failure},
+		expectedEvents:     []string{startedEventMessage, "Iterations completed: 0", "TaskRun run-taskloop-00001-.* has failed"},
+		extraTaskRunChecks: checkTaskRunRetries,
+	}, {
+		name:             "failed TaskLoop due to timeout",
+		taskloop:         getTaskLoopWithTimeout(sleepyTaskLoop),
+		run:              runSleepyTaskLoop,
+		expectedStatus:   corev1.ConditionFalse,
+		expectedReason:   taskloopv1alpha1.TaskLoopRunReasonFailed,
+		expectedTaskRuns: []*v1beta1.TaskRun{expectedTaskRunIteration1Timeout},
+		expectedEvents:   []string{startedEventMessage, "Iterations completed: 0", "TaskRun run-sleepy-00001-.* has failed"},
 	}, {
 		name:           "successful TaskLoop using an inline task",
 		taskloop:       aTaskLoopUsingAnInlineTask,
 		run:            runTaskLoopUsingAnInlineTaskSuccess,
 		expectedStatus: corev1.ConditionTrue,
 		expectedReason: taskloopv1alpha1.TaskLoopRunReasonSucceeded,
-		expectedTaskruns: []*v1beta1.TaskRun{
+		expectedTaskRuns: []*v1beta1.TaskRun{
 			getExpectedTaskRunForInlineTask(expectedTaskRunIteration1Success),
 			getExpectedTaskRunForInlineTask(expectedTaskRunIteration2Success),
 		},
@@ -338,7 +422,7 @@ func TestTaskLoopRun(t *testing.T) {
 		run:            runTaskLoopUsingAClusterTaskSuccess,
 		expectedStatus: corev1.ConditionTrue,
 		expectedReason: taskloopv1alpha1.TaskLoopRunReasonSucceeded,
-		expectedTaskruns: []*v1beta1.TaskRun{
+		expectedTaskRuns: []*v1beta1.TaskRun{
 			getExpectedTaskRunForClusterTask(expectedTaskRunIteration1Success),
 			getExpectedTaskRunForClusterTask(expectedTaskRunIteration2Success),
 		},
@@ -406,14 +490,14 @@ func TestTaskLoopRun(t *testing.T) {
 			}
 
 			t.Logf("Making sure the expected TaskRuns were created")
-			actualTaskrunList, err := c.TaskRunClient.List(metav1.ListOptions{LabelSelector: fmt.Sprintf("tekton.dev/run=%s", run.Name)})
+			actualTaskRunList, err := c.TaskRunClient.List(metav1.ListOptions{LabelSelector: fmt.Sprintf("tekton.dev/run=%s", run.Name)})
 			if err != nil {
 				t.Fatalf("Error listing TaskRuns for Run %s/%s: %s", run.Namespace, run.Name, err)
 			}
 
-			if len(tc.expectedTaskruns) != len(actualTaskrunList.Items) {
+			if len(tc.expectedTaskRuns) != len(actualTaskRunList.Items) {
 				t.Errorf("Expected %d TaskRuns for Run %s/%s but found %d",
-					len(tc.expectedTaskruns), run.Namespace, run.Name, len(actualTaskrunList.Items))
+					len(tc.expectedTaskRuns), run.Namespace, run.Name, len(actualTaskRunList.Items))
 			}
 
 			// Check TaskRun status in the Run's status.
@@ -421,50 +505,54 @@ func TestTaskLoopRun(t *testing.T) {
 			if err := run.Status.DecodeExtraFields(status); err != nil {
 				t.Errorf("DecodeExtraFields error: %v", err.Error())
 			}
-			for i, expectedTaskrun := range tc.expectedTaskruns {
-				expectedTaskrun = expectedTaskrun.DeepCopy()
-				expectedTaskrun.ObjectMeta.Annotations = getExpectedTaskRunAnnotations(tc.taskloop, run)
-				expectedTaskrun.ObjectMeta.Labels = getExpectedTaskRunLabels(tc.task, tc.clustertask, tc.taskloop, run, i+1)
-				var actualTaskrun v1beta1.TaskRun
+			for i, expectedTaskRun := range tc.expectedTaskRuns {
+				expectedTaskRun = expectedTaskRun.DeepCopy()
+				expectedTaskRun.ObjectMeta.Annotations = getExpectedTaskRunAnnotations(tc.taskloop, run)
+				expectedTaskRun.ObjectMeta.Labels = getExpectedTaskRunLabels(tc.task, tc.clustertask, tc.taskloop, run, i+1)
+				var actualTaskRun v1beta1.TaskRun
 				found := false
-				for _, actualTaskrun = range actualTaskrunList.Items {
-					if strings.HasPrefix(actualTaskrun.Name, expectedTaskrun.Name) {
+				for _, actualTaskRun = range actualTaskRunList.Items {
+					if strings.HasPrefix(actualTaskRun.Name, expectedTaskRun.Name) {
 						found = true
 						break
 					}
 				}
 				if !found {
 					t.Errorf("Expected TaskRun with prefix %s for Run %s/%s not found",
-						expectedTaskrun.Name, run.Namespace, run.Name)
+						expectedTaskRun.Name, run.Namespace, run.Name)
 					continue
 				}
-				if d := cmp.Diff(expectedTaskrun.Spec, actualTaskrun.Spec); d != "" {
-					t.Errorf("TaskRun %s spec does not match expected spec. Diff %s", actualTaskrun.Name, diff.PrintWantGot(d))
+				if d := cmp.Diff(expectedTaskRun.Spec, actualTaskRun.Spec); d != "" {
+					t.Errorf("TaskRun %s spec does not match expected spec. Diff %s", actualTaskRun.Name, diff.PrintWantGot(d))
 				}
-				if d := cmp.Diff(expectedTaskrun.ObjectMeta.Annotations, actualTaskrun.ObjectMeta.Annotations,
+				if d := cmp.Diff(expectedTaskRun.ObjectMeta.Annotations, actualTaskRun.ObjectMeta.Annotations,
 					cmpopts.IgnoreMapEntries(ignoreReleaseAnnotation)); d != "" {
-					t.Errorf("TaskRun %s does not have expected annotations. Diff %s", actualTaskrun.Name, diff.PrintWantGot(d))
+					t.Errorf("TaskRun %s does not have expected annotations. Diff %s", actualTaskRun.Name, diff.PrintWantGot(d))
 				}
-				if d := cmp.Diff(expectedTaskrun.ObjectMeta.Labels, actualTaskrun.ObjectMeta.Labels); d != "" {
-					t.Errorf("TaskRun %s does not have expected labels. Diff %s", actualTaskrun.Name, diff.PrintWantGot(d))
+				if d := cmp.Diff(expectedTaskRun.ObjectMeta.Labels, actualTaskRun.ObjectMeta.Labels); d != "" {
+					t.Errorf("TaskRun %s does not have expected labels. Diff %s", actualTaskRun.Name, diff.PrintWantGot(d))
 				}
-				if d := cmp.Diff(expectedTaskrun.Status.Status.Conditions, actualTaskrun.Status.Status.Conditions,
+				if d := cmp.Diff(expectedTaskRun.Status.Status.Conditions, actualTaskRun.Status.Status.Conditions,
 					cmpopts.IgnoreTypes(apis.Condition{}.Message, apis.Condition{}.LastTransitionTime)); d != "" {
-					t.Errorf("TaskRun %s does not have expected status condition. Diff %s", actualTaskrun.Name, diff.PrintWantGot(d))
+					t.Errorf("TaskRun %s does not have expected status condition. Diff %s", actualTaskRun.Name, diff.PrintWantGot(d))
 				}
 
-				taskRunStatusInTaskLoopRun, exists := status.TaskRuns[actualTaskrun.Name]
+				if tc.extraTaskRunChecks != nil {
+					tc.extraTaskRunChecks(t, expectedTaskRun, &actualTaskRun)
+				}
+
+				taskRunStatusInTaskLoopRun, exists := status.TaskRuns[actualTaskRun.Name]
 				if !exists {
-					t.Errorf("Run status does not include TaskRun status for TaskRun %s", actualTaskrun.Name)
+					t.Errorf("Run status does not include TaskRun status for TaskRun %s", actualTaskRun.Name)
 				} else {
-					if d := cmp.Diff(expectedTaskrun.Status.Status.Conditions, taskRunStatusInTaskLoopRun.Status.Status.Conditions,
+					if d := cmp.Diff(expectedTaskRun.Status.Status.Conditions, taskRunStatusInTaskLoopRun.Status.Status.Conditions,
 						cmpopts.IgnoreTypes(apis.Condition{}.Message, apis.Condition{}.LastTransitionTime)); d != "" {
 						t.Errorf("Run status for TaskRun %s does not have expected status condition. Diff %s",
-							actualTaskrun.Name, diff.PrintWantGot(d))
+							actualTaskRun.Name, diff.PrintWantGot(d))
 					}
 					if i+1 != taskRunStatusInTaskLoopRun.Iteration {
 						t.Errorf("Run status for TaskRun %s has iteration number %d instead of %d",
-							actualTaskrun.Name, taskRunStatusInTaskLoopRun.Iteration, i+1)
+							actualTaskRun.Name, taskRunStatusInTaskLoopRun.Iteration, i+1)
 					}
 				}
 			}
@@ -497,46 +585,13 @@ func TestCancelTaskLoopRun(t *testing.T) {
 		knativetest.CleanupOnInterrupt(func() { tearDown(t, c, namespace) }, t.Logf)
 		defer tearDown(t, c, namespace)
 
-		a_taskloop := &taskloopv1alpha1.TaskLoop{
-			ObjectMeta: metav1.ObjectMeta{Name: "sleep", Namespace: namespace},
-			Spec: taskloopv1alpha1.TaskLoopSpec{
-				TaskSpec: &v1beta1.TaskSpec{
-					Params: []v1beta1.ParamSpec{{
-						Name: "sleep-time",
-						Type: v1beta1.ParamTypeString,
-					}},
-					Steps: []v1beta1.Step{{
-						Container: corev1.Container{
-							Image: "busybox",
-						},
-						Script: "sleep $(params.sleep-time)",
-					}},
-				},
-				IterateParam: "sleep-time",
-			},
-		}
-
-		run := &v1alpha1.Run{
-			ObjectMeta: metav1.ObjectMeta{Name: "cancel-me", Namespace: namespace},
-			Spec: v1alpha1.RunSpec{
-				Params: []v1beta1.Param{{
-					Name:  "sleep-time",
-					Value: v1beta1.ArrayOrString{Type: v1beta1.ParamTypeArray, ArrayVal: []string{"5000", "5000"}},
-				}},
-				Ref: &v1alpha1.TaskRef{
-					APIVersion: taskloopv1alpha1.SchemeGroupVersion.String(),
-					Kind:       taskloop.TaskLoopControllerName,
-					Name:       "sleep",
-				},
-			},
-		}
-
 		t.Logf("Creating TaskLoop in namespace %s", namespace)
-		if _, err := taskLoopClient.Create(a_taskloop); err != nil {
-			t.Fatalf("Failed to create TaskLoop `%s`: %s", a_taskloop.Name, err)
+		if _, err := taskLoopClient.Create(sleepyTaskLoop); err != nil {
+			t.Fatalf("Failed to create TaskLoop `%s`: %s", sleepyTaskLoop.Name, err)
 		}
 
 		t.Logf("Creating Run in namespace %s", namespace)
+		run := runSleepyTaskLoop
 		if _, err := c.RunClient.Create(run); err != nil {
 			t.Fatalf("Failed to create Run `%s`: %s", run.Name, err)
 		}
@@ -666,6 +721,25 @@ func getExpectedTaskRunLabels(task *v1beta1.Task, clustertask *v1beta1.ClusterTa
 		labels[key] = value
 	}
 	return labels
+}
+
+func getTaskLoopWithRetries(taskloop *taskloopv1alpha1.TaskLoop) *taskloopv1alpha1.TaskLoop {
+	taskloop = taskloop.DeepCopy()
+	taskloop.Spec.Retries = numRetries
+	return taskloop
+}
+
+func getTaskLoopWithTimeout(taskloop *taskloopv1alpha1.TaskLoop) *taskloopv1alpha1.TaskLoop {
+	taskloop = taskloop.DeepCopy()
+	taskloop.Spec.Timeout = taskTimeout
+	return taskloop
+}
+
+func checkTaskRunRetries(t *testing.T, expectedTaskRun *v1beta1.TaskRun, actualTaskRun *v1beta1.TaskRun) {
+	if len(actualTaskRun.Status.RetriesStatus) != numRetries {
+		t.Errorf("Expected TaskRun %s to be retried %d times but it was retried %d times",
+			actualTaskRun.Name, numRetries, len(actualTaskRun.Status.RetriesStatus))
+	}
 }
 
 // collectMatchingEvents collects a list of events under 5 seconds that match certain objects by kind and name.
