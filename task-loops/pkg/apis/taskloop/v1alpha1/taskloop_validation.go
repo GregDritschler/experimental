@@ -41,6 +41,9 @@ func (tls *TaskLoopSpec) Validate(ctx context.Context) *apis.FieldError {
 	if err := validateTask(ctx, tls); err != nil {
 		return err
 	}
+	if len(tls.IterateParams) == 0 {
+		return apis.ErrInvalidValue("iterateParams is missing or empty", "spec.iterateParams")
+	}
 	return nil
 }
 

@@ -254,6 +254,9 @@ var aTask = &v1beta1.Task{
 			Name: "current-item",
 			Type: v1beta1.ParamTypeString,
 		}, {
+			Name: "current-component",
+			Type: v1beta1.ParamTypeString,
+		}, {
 			Name: "additional-parameter",
 			Type: v1beta1.ParamTypeString,
 		}},
@@ -266,8 +269,8 @@ var aTask = &v1beta1.Task{
 var aTaskLoop = &taskloopv1alpha1.TaskLoop{
 	ObjectMeta: metav1.ObjectMeta{Name: "a-taskloop", Namespace: "foo"},
 	Spec: taskloopv1alpha1.TaskLoopSpec{
-		TaskRef:      &v1beta1.TaskRef{Name: "a-task"},
-		IterateParam: "current-item",
+		TaskRef:       &v1beta1.TaskRef{Name: "a-task"},
+		IterateParams: []string{"current-item", "current-component"},
 	},
 }
 
@@ -279,6 +282,9 @@ var aTaskLoopWithInlineTask = &taskloopv1alpha1.TaskLoop{
 				Name: "current-item",
 				Type: v1beta1.ParamTypeString,
 			}, {
+				Name: "current-component",
+				Type: v1beta1.ParamTypeString,
+			}, {
 				Name: "additional-parameter",
 				Type: v1beta1.ParamTypeString,
 			}},
@@ -286,8 +292,8 @@ var aTaskLoopWithInlineTask = &taskloopv1alpha1.TaskLoop{
 				Container: corev1.Container{Name: "foo", Image: "bar"},
 			}},
 		},
-		IterateParam: "current-item",
-		Timeout:      &metav1.Duration{Duration: 5 * time.Minute},
+		IterateParams: []string{"current-item", "current-component"},
+		Timeout:       &metav1.Duration{Duration: 5 * time.Minute},
 	},
 }
 
@@ -306,6 +312,9 @@ var runTaskLoop = &v1alpha1.Run{
 		Params: []v1beta1.Param{{
 			Name:  "current-item",
 			Value: v1beta1.ArrayOrString{Type: v1beta1.ParamTypeArray, ArrayVal: []string{"item1", "item2"}},
+		}, {
+			Name:  "current-component",
+			Value: v1beta1.ArrayOrString{Type: v1beta1.ParamTypeArray, ArrayVal: []string{"component1", "component2"}},
 		}, {
 			Name:  "additional-parameter",
 			Value: v1beta1.ArrayOrString{Type: v1beta1.ParamTypeString, StringVal: "stuff"},
@@ -333,6 +342,9 @@ var runTaskLoopWithInlineTask = &v1alpha1.Run{
 		Params: []v1beta1.Param{{
 			Name:  "current-item",
 			Value: v1beta1.ArrayOrString{Type: v1beta1.ParamTypeArray, ArrayVal: []string{"item1", "item2"}},
+		}, {
+			Name:  "current-component",
+			Value: v1beta1.ArrayOrString{Type: v1beta1.ParamTypeArray, ArrayVal: []string{"component1", "component2"}},
 		}, {
 			Name:  "additional-parameter",
 			Value: v1beta1.ArrayOrString{Type: v1beta1.ParamTypeString, StringVal: "stuff"},
@@ -441,6 +453,9 @@ var expectedTaskRunIteration1 = &v1beta1.TaskRun{
 			Name:  "current-item",
 			Value: v1beta1.ArrayOrString{Type: v1beta1.ParamTypeString, StringVal: "item1"},
 		}, {
+			Name:  "current-component",
+			Value: v1beta1.ArrayOrString{Type: v1beta1.ParamTypeString, StringVal: "component1"},
+		}, {
 			Name:  "additional-parameter",
 			Value: v1beta1.ArrayOrString{Type: v1beta1.ParamTypeString, StringVal: "stuff"},
 		}},
@@ -475,6 +490,9 @@ var expectedTaskRunIteration2 = &v1beta1.TaskRun{
 			Name:  "current-item",
 			Value: v1beta1.ArrayOrString{Type: v1beta1.ParamTypeString, StringVal: "item2"},
 		}, {
+			Name:  "current-component",
+			Value: v1beta1.ArrayOrString{Type: v1beta1.ParamTypeString, StringVal: "component2"},
+		}, {
 			Name:  "additional-parameter",
 			Value: v1beta1.ArrayOrString{Type: v1beta1.ParamTypeString, StringVal: "stuff"},
 		}},
@@ -508,6 +526,9 @@ var expectedTaskRunWithInlineTaskIteration1 = &v1beta1.TaskRun{
 				Name: "current-item",
 				Type: v1beta1.ParamTypeString,
 			}, {
+				Name: "current-component",
+				Type: v1beta1.ParamTypeString,
+			}, {
 				Name: "additional-parameter",
 				Type: v1beta1.ParamTypeString,
 			}},
@@ -518,6 +539,9 @@ var expectedTaskRunWithInlineTaskIteration1 = &v1beta1.TaskRun{
 		Params: []v1beta1.Param{{
 			Name:  "current-item",
 			Value: v1beta1.ArrayOrString{Type: v1beta1.ParamTypeString, StringVal: "item1"},
+		}, {
+			Name:  "current-component",
+			Value: v1beta1.ArrayOrString{Type: v1beta1.ParamTypeString, StringVal: "component1"},
 		}, {
 			Name:  "additional-parameter",
 			Value: v1beta1.ArrayOrString{Type: v1beta1.ParamTypeString, StringVal: "stuff"},
@@ -747,7 +771,7 @@ func TestReconcileTaskLoopRunFailures(t *testing.T) {
 		reason:   taskloopv1alpha1.TaskLoopRunReasonFailedValidation,
 		wantEvents: []string{
 			"Normal Started ",
-			`Warning Failed Cannot determine number of iterations: The value of the iterate parameter "current-item" is not an array`,
+			`Warning Failed Cannot determine number of iterations: The value of iterate parameter "current-item" is not an array`,
 		},
 	}}
 

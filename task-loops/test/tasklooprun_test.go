@@ -103,8 +103,8 @@ var aTaskLoop = &taskloopv1alpha1.TaskLoop{
 		},
 	},
 	Spec: taskloopv1alpha1.TaskLoopSpec{
-		TaskRef:      &v1beta1.TaskRef{Name: "a-task"},
-		IterateParam: "current-item",
+		TaskRef:       &v1beta1.TaskRef{Name: "a-task"},
+		IterateParams: []string{"current-item"},
 	},
 }
 
@@ -114,8 +114,8 @@ var aTaskLoopUsingAnInlineTask = &taskloopv1alpha1.TaskLoop{
 		// No labels or annotations in this one to test that case works
 	},
 	Spec: taskloopv1alpha1.TaskLoopSpec{
-		TaskSpec:     &commonTaskSpec,
-		IterateParam: "current-item",
+		TaskSpec:      &commonTaskSpec,
+		IterateParams: []string{"current-item"},
 	},
 }
 
@@ -125,8 +125,8 @@ var aTaskLoopUsingAClusterTask = &taskloopv1alpha1.TaskLoop{
 		// No labels or annotations in this one to test that case works
 	},
 	Spec: taskloopv1alpha1.TaskLoopSpec{
-		TaskRef:      &v1beta1.TaskRef{Name: clusterTaskName, Kind: "ClusterTask"},
-		IterateParam: "current-item",
+		TaskRef:       &v1beta1.TaskRef{Name: clusterTaskName, Kind: "ClusterTask"},
+		IterateParams: []string{"current-item"},
 	},
 }
 
@@ -314,7 +314,7 @@ var sleepyTaskLoop = &taskloopv1alpha1.TaskLoop{
 				Script: "sleep $(params.sleep-time)",
 			}},
 		},
-		IterateParam: "sleep-time",
+		IterateParams: []string{"sleep-time"},
 	},
 }
 

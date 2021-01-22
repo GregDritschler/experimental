@@ -38,12 +38,14 @@ import (
 	listers "github.com/tektoncd/pipeline/pkg/client/listers/pipeline/v1beta1"
 	"github.com/tektoncd/pipeline/pkg/names"
 	"github.com/tektoncd/pipeline/pkg/reconciler/events"
+	"github.com/tektoncd/pipeline/pkg/substitution"
 	"go.uber.org/zap"
 	"gomodules.xyz/jsonpatch/v2"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"knative.dev/pkg/apis"
 	"knative.dev/pkg/logging"
 	pkgreconciler "knative.dev/pkg/reconciler"
@@ -417,37 +419,83 @@ func getCancelPatch() ([]byte, error) {
 }
 
 func computeIterations(run *v1alpha1.Run, tls *taskloopv1alpha1.TaskLoopSpec) (int, error) {
-	// Find the iterate parameter.
-	numberOfIterations := -1
+	// Convert Run parameters to a map.
+	paramMap := make(map[string]v1beta1.Param, len(run.Spec.Params))
 	for _, p := range run.Spec.Params {
-		if p.Name == tls.IterateParam {
+		paramMap[p.Name] = p
+	}
+	// Find the iterate parameters.  Make sure each is an array with the same number of elements.
+	numberOfIterations := -1
+	for _, iterateParam := range tls.IterateParams {
+		if p, ok := paramMap[iterateParam]; ok {
 			if p.Value.Type == v1beta1.ParamTypeArray {
-				numberOfIterations = len(p.Value.ArrayVal)
-				break
+				if numberOfIterations == -1 {
+					numberOfIterations = len(p.Value.ArrayVal)
+				} else {
+					if len(p.Value.ArrayVal) != numberOfIterations {
+						return 0, fmt.Errorf("All iterate parameters must have the same number of elements")
+					}
+				}
 			} else {
-				return 0, fmt.Errorf("The value of the iterate parameter %q is not an array", tls.IterateParam)
+				return 0, fmt.Errorf("The value of iterate parameter %q is not an array", iterateParam)
 			}
+		} else {
+			return 0, fmt.Errorf("The iterate parameter %q was not found", iterateParam)
 		}
 	}
 	if numberOfIterations == -1 {
-		return 0, fmt.Errorf("The iterate parameter %q was not found", tls.IterateParam)
+		return 0, fmt.Errorf("No iterate parameters were found")
 	}
 	return numberOfIterations, nil
 }
 
 func getParameters(run *v1alpha1.Run, tls *taskloopv1alpha1.TaskLoopSpec, iteration int) []v1beta1.Param {
-	out := make([]v1beta1.Param, len(run.Spec.Params))
-	for i, p := range run.Spec.Params {
-		if p.Name == tls.IterateParam {
-			out[i] = v1beta1.Param{
-				Name:  p.Name,
-				Value: v1beta1.ArrayOrString{Type: v1beta1.ParamTypeString, StringVal: p.Value.ArrayVal[iteration-1]},
+	// Convert iterate parameter names to a set.
+	iterateParams := sets.NewString()
+	for _, iterateParam := range tls.IterateParams {
+		iterateParams.Insert(iterateParam)
+	}
+	// Convert TaskLoop parameter names to a set.
+	taskloopParams := sets.NewString()
+	for _, taskloopParam := range tls.Params {
+		taskloopParams.Insert(taskloopParam.Name)
+	}
+	stringReplacements := map[string]string{}
+	taskParams := make([]v1beta1.Param, 0, len(run.Spec.Params))
+	for _, p := range run.Spec.Params {
+		// Iterate parameters need to be set based on the current iteration.
+		if iterateParams.Has(p.Name) {
+			currentValue := p.Value.ArrayVal[iteration-1]
+			stringReplacements[fmt.Sprintf("taskloop.params.%s", p.Name)] = currentValue
+			// TaskLoop parameters are scoped to the TaskLoop itself and are not passed to the Task.
+			if !taskloopParams.Has(p.Name) {
+				taskParams = append(taskParams, v1beta1.Param{
+					Name:  p.Name,
+					Value: v1beta1.ArrayOrString{Type: v1beta1.ParamTypeString, StringVal: currentValue},
+				})
 			}
 		} else {
-			out[i] = run.Spec.Params[i]
+			taskParams = append(taskParams, p)
 		}
 	}
-	return out
+	// Apply string replacements for the current values of iterable parameters in non-iterable parameters.
+	// These replacements cannot be used in iterable parameters since there would be obvious problems.
+	//   - an iterable parameter referencing itself
+	//   - an iterable parameter referencing another one (this creates resolution ordering issues)
+	for i, p := range taskParams {
+		if !iterateParams.Has(p.Name) {
+			if p.Value.Type == v1beta1.ParamTypeString {
+				taskParams[i].Value.StringVal = substitution.ApplyReplacements(p.Value.StringVal, stringReplacements)
+			} else {
+				var newArrayVal []string
+				for _, v := range p.Value.ArrayVal {
+					newArrayVal = append(newArrayVal, substitution.ApplyArrayReplacements(v, stringReplacements, map[string][]string{})...)
+				}
+				taskParams[i].Value.ArrayVal = newArrayVal
+			}
+		}
+	}
+	return taskParams
 }
 
 func getTaskRunAnnotations(run *v1alpha1.Run) map[string]string {

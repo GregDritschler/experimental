@@ -47,8 +47,13 @@ type TaskLoopSpec struct {
 	// +optional
 	TaskSpec *v1beta1.TaskSpec `json:"taskSpec,omitempty"`
 
-	// IterateParam is the name of the task parameter that is iterated upon.
-	IterateParam string `json:"iterateParam"`
+	// Params declares a list of input parameters that can be supplied
+	// in addition to those declared by the task.  These parameters
+	// are used only by the TaskLoop itself and are not passed to the task.
+	Params []v1beta1.ParamSpec `json:"params,omitempty"`
+
+	// IterateParams are the names of the task parameters that are iterated upon.
+	IterateParams []string `json:"iterateParams"`
 
 	// Time after which the TaskRun times out.
 	// +optional

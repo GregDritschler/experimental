@@ -135,6 +135,18 @@ func (in *TaskLoopSpec) DeepCopyInto(out *TaskLoopSpec) {
 		*out = new(v1beta1.TaskSpec)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.Params != nil {
+		in, out := &in.Params, &out.Params
+		*out = make([]v1beta1.ParamSpec, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+	if in.IterateParams != nil {
+		in, out := &in.IterateParams, &out.IterateParams
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.Timeout != nil {
 		in, out := &in.Timeout, &out.Timeout
 		*out = new(v1.Duration)

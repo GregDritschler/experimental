@@ -31,7 +31,7 @@ A `TaskLoop` definition supports the following fields:
   - [`metadata`][kubernetes-overview] - Specifies the metadata that uniquely identifies the `TaskLoop`, such as a `name`.
   - [`spec`][kubernetes-overview] - Specifies the configuration for the `TaskLoop`.
     - [`taskRef` or `taskSpec`](#specifying-the-target-task) - Specifies the `Task` to execute.
-    - [`iterateParam`](#specifying-the-iteration-parameter) - Specifies the name of the `Task` parameter that holds the values to iterate.
+    - [`iterateParams`](#specifying-the-iteration-parameters) - Specifies the name of the `Task` parameters that hold the values to iterate.
 - Optional:
   - [`timeout`](#specifying-a-timeout) - Specifies a timeout for the execution of a `Task`.
   - [`retries`](#specifying-retries) - Specifies the number of times to retry the execution of a `Task` after a failure.
@@ -84,9 +84,9 @@ spec:
 ```
 
 
-#### Specifying the iteration parameter
+#### Specifying the iteration parameters
 
-The `iterateParam` field specifies the name of the `Task` parameter which varies for each execution of the `Task`.
+The `iterateParams` field specifies the names of the `Task` parameters which vary for each execution of the `Task`.
 This is what controls the loop.
 
 * The parameter type as defined in the `Task` must be `string`.
@@ -102,6 +102,8 @@ metadata:
 spec:
   params:
     - name: test-type
+      type: string
+    - name: publish-location
       type: string
   steps:
     - name: run-test
@@ -119,7 +121,8 @@ metadata:
 spec:
   taskRef:
     name: testtask
-  iterateParam: test-type
+  iterateParams: 
+    - test-type
 ```
 
 Your `Run` would look like this:
@@ -136,6 +139,8 @@ spec:
         - codeanalysis
         - unittests
         - e2etests
+    - name: publish-location
+      value: "https://testdata.example.com"
   ref:
     apiVersion: custom.tekton.dev/v1alpha1
     kind: TaskLoop
@@ -146,6 +151,54 @@ This `Run` would result in three `TaskRun`s being created to run the `Task` `tes
 In the first `TaskRun` the parameter `test-type` would be set to `codeanalysis`.
 In the second `TaskRun` the parameter `test-type` would be set to `unittests`.
 In the third `TaskRun` the parameter `test-type` would be set to `e2etests`.
+
+You can vary the values of multiple Task parameters.
+Suppose you want to vary both the `test-type` and `publish-location` parameters.
+In that case your `TaskLoop` would look like this:
+
+```yaml
+apiVersion: custom.tekton.dev/v1alpha1
+kind: TaskLoop
+metadata:
+  name: testloop
+spec:
+  taskRef:
+    name: testtask
+  iterateParams: 
+    - test-type
+    - publish-location
+```
+
+Your `Run` would look like this:
+
+```yaml
+apiVersion: tekton.dev/v1alpha1
+kind: Run
+metadata:
+  generateName: testloop-run-
+spec:
+  params:
+    - name: test-type
+      value:
+        - codeanalysis
+        - unittests
+        - e2etests
+    - name: publish-location
+      value: 
+        - "https://testdata.example.com/code"
+        - "https://testdata.example.com/ut"
+        - "https://testdata.example.com/e2e"
+  ref:
+    apiVersion: custom.tekton.dev/v1alpha1
+    kind: TaskLoop
+    name: testloop
+```
+
+Each iteration parameter must have the same number of values.
+Each `TaskRun` uses the value at the same index of each iteration parameter.
+The first `TaskRun` uses the first value of each iteration parameter,
+the second `TaskRun` uses the second value of each iteration parameter,
+and so on.
 
 #### Specifying a timeout
 
@@ -259,8 +312,6 @@ spec:
 
 The following limitations exist.
 These limitations may be addressed in future issues based on community feedback.
-
-* The value of only one `Task` parameter can be varied between `TaskRun` executions.
 
 * Each `TaskRun` is executed sequentially.  The second `TaskRun` is created only after the first `TaskRun` completes, and so on.
 

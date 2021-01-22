@@ -39,7 +39,8 @@ func TestTaskLoop_Validate_Success(t *testing.T) {
 		tl: &taskloopv1alpha1.TaskLoop{
 			ObjectMeta: metav1.ObjectMeta{Name: "taskloop"},
 			Spec: taskloopv1alpha1.TaskLoopSpec{
-				TaskRef: &v1beta1.TaskRef{Name: "mytask"},
+				TaskRef:       &v1beta1.TaskRef{Name: "mytask"},
+				IterateParams: []string{"param1"},
 			},
 		},
 	}, {
@@ -52,6 +53,7 @@ func TestTaskLoop_Validate_Success(t *testing.T) {
 						Container: corev1.Container{Name: "foo", Image: "bar"},
 					}},
 				},
+				IterateParams: []string{"param1"},
 			},
 		},
 	}}
@@ -74,7 +76,9 @@ func TestTaskLoop_Validate_Error(t *testing.T) {
 		name: "no taskRef or taskSpec",
 		tl: &taskloopv1alpha1.TaskLoop{
 			ObjectMeta: metav1.ObjectMeta{Name: "taskloop"},
-			Spec:       taskloopv1alpha1.TaskLoopSpec{},
+			Spec: taskloopv1alpha1.TaskLoopSpec{
+				IterateParams: []string{"param1"},
+			},
 		},
 		expectedError: apis.FieldError{
 			Message: "expected exactly one, got neither",
@@ -91,6 +95,7 @@ func TestTaskLoop_Validate_Error(t *testing.T) {
 						Container: corev1.Container{Name: "foo", Image: "bar"},
 					}},
 				},
+				IterateParams: []string{"param1"},
 			},
 		},
 		expectedError: apis.FieldError{
@@ -102,7 +107,8 @@ func TestTaskLoop_Validate_Error(t *testing.T) {
 		tl: &taskloopv1alpha1.TaskLoop{
 			ObjectMeta: metav1.ObjectMeta{Name: "taskloop"},
 			Spec: taskloopv1alpha1.TaskLoopSpec{
-				TaskRef: &v1beta1.TaskRef{Name: "_bad"},
+				TaskRef:       &v1beta1.TaskRef{Name: "_bad"},
+				IterateParams: []string{"param1"},
 			},
 		},
 		expectedError: apis.FieldError{
@@ -121,12 +127,25 @@ func TestTaskLoop_Validate_Error(t *testing.T) {
 						Container: corev1.Container{Name: "bad@name!", Image: "bar"},
 					}},
 				},
+				IterateParams: []string{"param1"},
 			},
 		},
 		expectedError: apis.FieldError{
 			Message: `invalid value "bad@name!"`,
 			Details: "Task step name must be a valid DNS Label, For more info refer to https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names",
 			Paths:   []string{"spec.taskSpec.steps[0].name"},
+		},
+	}, {
+		name: "missing iterateParams",
+		tl: &taskloopv1alpha1.TaskLoop{
+			ObjectMeta: metav1.ObjectMeta{Name: "taskloop"},
+			Spec: taskloopv1alpha1.TaskLoopSpec{
+				TaskRef: &v1beta1.TaskRef{Name: "mytask"},
+			},
+		},
+		expectedError: apis.FieldError{
+			Message: "invalid value: iterateParams is missing or empty",
+			Paths:   []string{"spec.iterateParams"},
 		},
 	}}
 	for _, tc := range tests {

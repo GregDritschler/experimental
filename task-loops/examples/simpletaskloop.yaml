@@ -24,7 +24,8 @@ spec:
   taskRef:
     name: simpletask
   # Parameter that contains the values to iterate
-  iterateParam: word
+  iterateParams: 
+    - word
   # Timeout (defaults to global default timeout, usually 1h00m; use "0" for no timeout)
   timeout: 60s
   # Retries for task failure
